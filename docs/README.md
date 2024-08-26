@@ -3,6 +3,14 @@
 
 Version 0.1
 
+## Create a static site as simply as possible.
+
+Create folders under `galleries`, add images, create a gallery card.
+
+Then run a single command to generate your site in `export`. Run the included server to demo locally on your browser.
+
+The rest you do is your business.
+
 ## Getting Started
 
 1. Copy `config.example.yaml` to `config.yaml` and make changes as desired.
