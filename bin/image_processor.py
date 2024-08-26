@@ -102,14 +102,6 @@ def process_image(image_path, output_dir, gallery_id):
             json.dump(metadata, f, indent=2)
 
         # Resize and save images
-            
-        # for size_name, max_size in config['image_sizes'].items():
-        #     img_copy = img.copy()
-        #     img_copy.thumbnail((max_size, max_size))
-        #     output_path = os.path.join(output_dir, size_name, os.path.basename(image_path))
-        #     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        #     img_copy.save(output_path, "JPEG", quality=config['jpg_quality'])
-
         for size_name, max_size in config['image_sizes'].items():
             output_path = os.path.join(output_dir, size_name, os.path.basename(image_path))
             if not os.path.exists(output_path):
