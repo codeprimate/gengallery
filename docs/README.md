@@ -18,7 +18,7 @@ The rest you do is your business.
 
 ## Usage
 
-1. Create a folder in `galleries`, and add a `gallery.yaml` (See the example gallery)
+1. Create a folder in `galleries`, and add a `gallery.yaml` (See the example gallery in `doc/example_gallery`)
 1. There are optional caption files for images.
 1. Run `bin/refresh.py --all` to update entire site, or if run for the first time
 1. Run `bin/refresh.py galleryname` to add/refresh that gallery
