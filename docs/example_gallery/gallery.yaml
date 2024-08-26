@@ -1,0 +1,27 @@
+title: "Example Gallery"
+date: 2024-08-25
+location: "Point Nemo"
+tags:
+  - example
+  - deleteme
+cover: "map.jpg"
+description: |
+    This is a description for the Example Gallery.
+    
+    Gallery descriptions can be long, but there won't be formatting.
+content: |
+  # Example
+
+  This is an example gallery. Feel free to delete this folder!
+
+  **Markdown** is _supported_.
+
+  ## Add Sections
+
+  ### And Subsections
+
+  *Lists*:
+
+  - This
+  - That
+  - Another
