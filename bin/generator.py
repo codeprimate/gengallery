@@ -65,12 +65,17 @@ def generate_gallery_pages(config, galleries_data, output_path):
             f.write(rendered_html)
 
         # Generate individual image pages
-        for image in gallery['images']:
+        for i, image in enumerate(gallery['images']):
+            prev_image = gallery['images'][i-1] if i > 0 else None
+            next_image = gallery['images'][i+1] if i < len(gallery['images'])-1 else None
+    
             image_context = {
                 'site_name': config['site_name'],
                 'author': config['author'],
                 'gallery': gallery,
                 'image': image,
+                'prev_image': prev_image,
+                'next_image': next_image,
                 'current_year': datetime.now().year
             }
 

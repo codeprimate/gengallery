@@ -22,16 +22,30 @@
             <a href="/galleries/{{ gallery.id }}/index.html" class="text-blue-500 hover:underline">&larr; Back to {{ gallery.title }}</a>
         </nav>
 
-        <div class="bg-white rounded-lg shadow-md overflow-hidden">
+        <div class="bg-white rounded-lg shadow-md overflow-hidden relative">
             <div class="flex justify-center items-center">
+                {% if prev_image %}
+                <a href="{{ prev_image.url }}" class="absolute left-4 top-1/4 transform -translate-y-1/2 nav-arrow">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="text-white bg-black bg-opacity-50 rounded-full p-2">
+                        <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </a>
+                {% endif %}
                 <a href="{{ image.path }}" class="block max-w-full">
                     <img src="{{ image.cover_path }}" alt="{{ image.title }}" class="max-h-[70vh] object-contain">
                 </a>
+                {% if next_image %}
+                <a href="{{ next_image.url }}" class="absolute right-4 top-1/4 transform -translate-y-1/2 nav-arrow">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="text-white bg-black bg-opacity-50 rounded-full p-2">
+                        <path d="M9 18L15 12L9 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </a>
+                {% endif %}
             </div>
             <div class="p-8">
                 <h2 class="text-2xl font-bold mb-4">{{ image.title }}</h2>
                 {% if image.caption %}
-                <p class="mb-4">{{ image.caption }}</p>
+                <p class="text-gray-700 mb-4">{{ image.caption }}</p>
                 {% endif %}
                 <p class="text-gray-700 mb-4">{{ image.filename }}</p>
                 <div class="grid grid-cols-2 gap-4">

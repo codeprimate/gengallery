@@ -10,3 +10,5 @@
 .markdown-content blockquote { border-left: 4px solid #e5e7eb; padding-left: 1rem; font-style: italic; margin: 1rem 0; }
 .markdown-content code { background-color: #f3f4f6; border-radius: 0.25rem; padding: 0.125rem 0.25rem; }
 .markdown-content pre { background-color: #f3f4f6; border-radius: 0.25rem; padding: 1rem; margin-bottom: 1rem; overflow-x: auto; }
+.nav-arrow { transition: opacity 0.3s ease; }
+.nav-arrow:hover { opacity: 0.7; }
