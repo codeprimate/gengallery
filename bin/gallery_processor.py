@@ -51,7 +51,7 @@ def process_gallery(gallery_path, output_path):
             gallery_data['images'].append(image_metadata)
 
     # Sort images by date taken if available
-    gallery_data['images'].sort(key=lambda x: x['exif'].get('DateTimeOriginal', ''))
+    gallery_data['images'].sort(key=lambda x: x['exif'].get('DateTimeOriginal', ''), reverse=True)
 
     return gallery_data
 
