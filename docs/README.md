@@ -24,6 +24,7 @@ The rest you do is your business.
 1. Run `bin/refresh.py galleryname` to add/refresh that gallery
 1. Run `bin/serve.py` to start a webserver at http://localhost:8000
 1. It is safe to delete anything in `exports` as long as you run `bin/refresh.py --all` afterward
+1. Run `git pull` for updates and new features   
 
 # Copyright
 
