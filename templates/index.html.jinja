@@ -22,7 +22,7 @@
         {% for gallery in galleries %}
         <section class="mb-12 bg-white rounded-lg shadow-md overflow-hidden">
             <div class="md:flex">
-                <div class="md:flex-shrink-0 md:w-2/3">
+                <div class="md:flex-shrink-0 md:w-2/3 max-h-[40vh]">
                     <a href="/galleries/{{ gallery.id }}/index.html">
                         <img class="w-full h-64 object-cover md:h-full" src="{{ gallery.cover.path }}" alt="{{ gallery.title }}">
                     </a>
