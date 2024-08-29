@@ -19,12 +19,12 @@ The rest you do is your business.
 ## Usage
 
 1. Create a folder in `galleries`, and add a `gallery.yaml` (See the example gallery in `doc/example_gallery`)
-1. There are optional caption files for images.
+1. There are optional caption files for images (see example gallery).
 1. Run `bin/refresh.py --all` to update entire site, or if run for the first time
 1. Run `bin/refresh.py galleryname` to add/refresh that gallery
 1. Run `bin/serve.py` to start a webserver at http://localhost:8000
 1. It is safe to delete anything in `exports` as long as you run `bin/refresh.py --all` afterward
-1. Run `git pull` for updates and new features   
+1. Run `git pull` for updates and new features
 
 # Copyright
 
