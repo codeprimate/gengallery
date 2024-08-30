@@ -22,7 +22,7 @@ def generate_image_id(image_path, gallery_id):
 
 def get_exif_data(image):
     exif_data = {}
-    info = image._getexif()
+    info = image.getexif()
     if info:
         for tag_id, value in info.items():
             tag = TAGS.get(tag_id, tag_id)
