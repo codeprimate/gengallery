@@ -75,8 +75,7 @@ def get_image_metadata(image_path):
             return yaml.safe_load(f)
     return {}
 
-def process_image(image_path, output_dir, gallery_id):
-    print(f"\nprocess_image called for {image_path}")    
+def process_image(image_path, output_dir, gallery_id): 
     with Image.open(image_path) as img:
         filename = os.path.basename(image_path)
         image_id = generate_image_id(filename, gallery_id)
