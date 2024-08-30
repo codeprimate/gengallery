@@ -4,19 +4,28 @@ import os
 import json
 import yaml
 from datetime import datetime
+import hashlib
 
 # Load configuration
 with open('config.yaml', 'r') as f:
     config = yaml.safe_load(f)
+
+def generate_image_id(image_path, gallery_id):
+    # Generate a unique ID based on the image path and gallery ID
+    unique_string = f"{gallery_id}:{image_path}"
+    return hashlib.md5(unique_string.encode()).hexdigest()[:12]
 
 def process_gallery(gallery_path, output_path):
     # Load gallery.yaml
     with open(os.path.join(gallery_path, 'gallery.yaml'), 'r') as f:
         post_data = yaml.safe_load(f)
 
+    gallery_id = os.path.basename(gallery_path)
+
     # Initialize gallery data
     gallery_data = {
-        "id": os.path.basename(gallery_path),
+        "id": gallery_id,
+        "name": gallery_id,
         "last_updated": datetime.now().isoformat(),
         "title": post_data.get('title', ''),
         "date": post_data.get('date', '').isoformat(),
@@ -29,17 +38,34 @@ def process_gallery(gallery_path, output_path):
 
     # Process cover image
     cover_image_filename = post_data.get('cover', '')
+
     if cover_image_filename:
-        cover_metadata_path = os.path.join(output_path, 'metadata', f"{os.path.splitext(cover_image_filename)[0]}.json")
+        image_path = os.path.join(gallery_id, cover_image_filename)
+        cover_image_id = generate_image_id(cover_image_filename, gallery_id)
+        cover_metadata_path = os.path.join(output_path, 'metadata', f"{cover_image_id}.json")
+
         if os.path.exists(cover_metadata_path):
             with open(cover_metadata_path, 'r') as f:
                 cover_metadata = json.load(f)
             gallery_data['cover'] = {
+                "id": cover_metadata['id'],
                 "filename": cover_metadata['filename'],
                 "title": cover_metadata['title'],
                 "caption": cover_metadata['caption'],
                 "path": cover_metadata['cover_path'],
                 "thumbnail_path": cover_metadata['thumbnail_path'],
+            }
+        else:
+            gallery_data['cover'] = {
+                "image_path": image_path,
+                "cover_image_id": cover_image_id,
+                "cover_metadata_path": cover_metadata_path,
+                "id": cover_image_id,
+                "filename": cover_image_filename,
+                "title": '',
+                "caption": '',
+                "path": '',
+                "thumbnail_path": ''
             }
 
     # Process all images
