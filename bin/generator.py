@@ -68,7 +68,7 @@ def generate_gallery_pages(config, galleries_data, output_path):
         for i, image in enumerate(gallery['images']):
             prev_image = gallery['images'][i-1] if i > 0 else None
             next_image = gallery['images'][i+1] if i < len(gallery['images'])-1 else None
-    
+
             image_context = {
                 'site_name': config['site_name'],
                 'author': config['author'],
@@ -81,12 +81,12 @@ def generate_gallery_pages(config, galleries_data, output_path):
 
             rendered_image_html = image_template.render(image_context)
 
-            image_file = os.path.splitext(image['filename'])[0] + '.html'
-            image_output_file = os.path.join(gallery_dir, image_file)
+            image_output_file = os.path.join(gallery_dir, f"{image['id']}.html")
             with open(image_output_file, 'w') as f:
                 f.write(rendered_image_html)
 
         print(f"Generated gallery page and {len(gallery['images'])} image pages for {gallery['title']}")
+
 
 def copy_static_files(config):
     # Create directories if they don't exist

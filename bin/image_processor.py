@@ -8,9 +8,17 @@ from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
 import yaml
 from fractions import Fraction
+import hashlib
+
+SUPPORTED_FORMATS = ('.jpg', '.jpeg', '.png', '.webp', '.tiff')
 
 with open('config.yaml', 'r') as f:
     config = yaml.safe_load(f)
+
+def generate_image_id(image_path, gallery_id):
+    # Generate a unique ID based on the image path and gallery ID
+    unique_string = f"{gallery_id}:{image_path}"
+    return hashlib.md5(unique_string.encode()).hexdigest()[:12]
 
 def get_exif_data(image):
     exif_data = {}
@@ -68,49 +76,47 @@ def get_image_metadata(image_path):
     return {}
 
 def process_image(image_path, output_dir, gallery_id):
+    print(f"\nprocess_image called for {image_path}")    
     with Image.open(image_path) as img:
-        # Extract EXIF data
-        exif_data = get_exif_data(img)
-        
-        # Get GPS coordinates
-        lat, lon = get_lat_lon(exif_data.get('GPSInfo'))
+        filename = os.path.basename(image_path)
+        image_id = generate_image_id(filename, gallery_id)
 
-        # Use file modification time if EXIF data is not available
+        exif_data = get_exif_data(img)
+        lat, lon = get_lat_lon(exif_data.get('GPSInfo'))
         if 'DateTimeOriginal' not in exif_data:
             file_mtime = os.path.getmtime(image_path)
             exif_data['DateTimeOriginal'] = datetime.fromtimestamp(file_mtime).strftime('%Y:%m:%d %H:%M:%S')
 
-        # Get image metadata from YAML
         image_metadata = get_image_metadata(image_path)
-
-        # Create metadata
-        metadata = {
-            "filename": os.path.basename(image_path),
-            "url": f"/galleries/{gallery_id}/{os.path.splitext(os.path.basename(image_path))[0]}.html",
-            "path": f"/galleries/{gallery_id}/full/{os.path.basename(image_path)}",
-            "thumbnail_path": f"/galleries/{gallery_id}/thumbnail/{os.path.basename(image_path)}",
-            "cover_path": f"/galleries/{gallery_id}/cover/{os.path.basename(image_path)}",
+        
+        output_metadata = {
+            "id": image_id,
+            "filename": filename,
+            "url": f"/galleries/{gallery_id}/{image_id}.html",
+            "path": f"/galleries/{gallery_id}/full/{image_id}.jpg",
+            "thumbnail_path": f"/galleries/{gallery_id}/thumbnail/{image_id}.jpg",
+            "cover_path": f"/galleries/{gallery_id}/cover/{image_id}.jpg",
             "title": image_metadata.get('title', os.path.splitext(os.path.basename(image_path))[0].replace('_', ' ').title()),
             "caption": image_metadata.get('caption', ''),
             "lat": lat,
             "lon": lon,
             "exif": exif_data
         }
-        metadata_path = os.path.join(output_dir, 'metadata', f"{os.path.splitext(os.path.basename(image_path))[0]}.json")
+        metadata_path = os.path.join(output_dir, 'metadata', f"{image_id}.json")
         os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
         with open(metadata_path, 'w') as f:
-            json.dump(metadata, f, indent=2)
+            json.dump(output_metadata, f, indent=2)
 
         # Resize and save images
         for size_name, max_size in config['image_sizes'].items():
-            output_path = os.path.join(output_dir, size_name, os.path.basename(image_path))
+            output_path = os.path.join(output_dir, size_name, f"{image_id}.jpg")
             if not os.path.exists(output_path):
                 img_copy = img.copy()
                 img_copy.thumbnail((max_size, max_size))
                 os.makedirs(os.path.dirname(output_path), exist_ok=True)
                 img_copy.save(output_path, "JPEG", quality=config['jpg_quality'])
 
-    return metadata
+    return output_metadata
 
 def process_gallery(gallery):
     gallery_path = os.path.join(config['source_path'], gallery)
@@ -120,9 +126,10 @@ def process_gallery(gallery):
         output_dir = os.path.join(config['output_path'], 'galleries', gallery)
         
         for image in os.listdir(images_dir):
-            if image.lower().endswith(('.jpg', '.jpeg')):
+            if image.lower().endswith(SUPPORTED_FORMATS):
                 image_path = os.path.join(images_dir, image)
-                process_image(image_path, output_dir, gallery)
+                gallery_id = os.path.basename(gallery_path)
+                process_image(image_path, output_dir, gallery_id)
                 print(".", end="", flush=True)
         print("OK", flush=True)
 
