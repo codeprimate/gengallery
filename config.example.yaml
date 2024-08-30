@@ -1,6 +1,6 @@
 image_sizes:
   cover: 1024
-  thumbnail: 300
+  thumbnail: 450
   full: 3840
 jpg_quality: 85
 output_path: "./export"
