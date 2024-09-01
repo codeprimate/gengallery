@@ -4,3 +4,4 @@ config.yaml
 export*/
 galleries*/*/**
 tmp/
+node_modules/

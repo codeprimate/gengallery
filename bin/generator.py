@@ -7,6 +7,7 @@ import shutil
 from jinja2 import Environment, FileSystemLoader
 from datetime import datetime
 import markdown
+import subprocess
 
 def load_config():
     with open('config.yaml', 'r') as f:
@@ -20,6 +21,21 @@ def load_galleries_data(output_path):
 
 def markdown_filter(text):
     return markdown.markdown(text)
+
+def generate_tailwind_css():
+    print("*** Generating Tailwind CSS...", flush=True)
+    input_css = "templates/tailwind/tailwind_input.css"
+    output_css = "templates/tailwind/tailwind.css"
+    config_file = "templates/tailwind/tailwind.config.js"
+    
+    subprocess.run([
+        "npx", "tailwindcss",
+        "-i", input_css,
+        "-o", output_css,
+        "--config", config_file,
+        "--minify"
+    ], check=True)
+    print("Tailwind CSS generated successfully.", flush=True)
 
 def generate_root_index(config, galleries_data, output_path):
     print("*** Generating Index page...", flush=True)
@@ -102,6 +118,23 @@ def generate_gallery_pages(config, galleries_data, output_path):
 
         print(f"Generated gallery page and {len(gallery['images'])} image pages for {gallery['title']}")
 
+def generate_404_page(config, output_path):
+    print("*** Generating 404 page...", flush=True)
+    env = Environment(loader=FileSystemLoader('templates'))
+    template = env.get_template('404.html.jinja')
+
+    context = {
+        'site_name': config['site_name'],
+        'author': config['author'],
+        'current_year': datetime.now().year
+    }
+
+    rendered_html = template.render(context)
+
+    output_file = os.path.join(output_path, 'public_html', '404.html')
+    with open(output_file, 'w') as f:
+        f.write(rendered_html)
+
 def copy_static_files(config, output_path):
     # Create directories if they don't exist
     os.makedirs(os.path.join(output_path, 'public_html', 'css'), exist_ok=True)
@@ -125,16 +158,28 @@ def copy_static_files(config, output_path):
     else:
         print(f"Warning: {js_src} not found")
 
+    # Copy Tailwind CSS file
+    tailwind_src = os.path.join('templates', 'tailwind', 'tailwind.css')
+    tailwind_dest = os.path.join(output_path, 'public_html', 'css', 'tailwind.css')
+    if os.path.exists(tailwind_src):
+        shutil.copy2(tailwind_src, tailwind_dest)
+        print(f"*** Copied {tailwind_src} to {tailwind_dest}")
+    else:
+        print(f"Warning: {tailwind_src} not found")
+
 def main():
     config = load_config()
     os.makedirs(os.path.join(config['output_path'], 'public_html'), exist_ok=True)
     os.makedirs(os.path.join(config['output_path'], 'metadata'), exist_ok=True)
     
+    generate_tailwind_css()
+    
     galleries_data = load_galleries_data(config['output_path'])
     generate_root_index(config, galleries_data, config['output_path'])
     generate_gallery_pages(config, galleries_data, config['output_path'])
+    generate_404_page(config, config['output_path'])
     copy_static_files(config, config['output_path'])
-    print("Root index.html, gallery pages generated, and static files copied successfully.")
+    print("Root index.html, gallery pages, 404 page generated, and static files copied successfully.")
 
 if __name__ == "__main__":
     main()
