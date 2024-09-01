@@ -90,3 +90,37 @@ class GalleryLogin {
         }
     }
 }
+
+class GalleryLock {
+    constructor(galleryId, privateGalleryId) {
+        this.galleryId = galleryId;
+        this.privateGalleryId = privateGalleryId;
+        this.lockIcon = document.getElementById('lockIcon');
+        this.openLock = this.lockIcon.querySelector('.open-lock');
+        this.closedLock = this.lockIcon.querySelector('.closed-lock');
+
+        this.init();
+    }
+
+    init() {
+        this.lockIcon.addEventListener('mouseover', this.showClosedLock.bind(this));
+        this.lockIcon.addEventListener('mouseout', this.showOpenLock.bind(this));
+        this.lockIcon.addEventListener('click', this.handleLockClick.bind(this));
+    }
+
+    showClosedLock() {
+        this.openLock.classList.add('hidden');
+        this.closedLock.classList.remove('hidden');
+    }
+
+    showOpenLock() {
+        this.openLock.classList.remove('hidden');
+        this.closedLock.classList.add('hidden');
+    }
+
+    handleLockClick(event) {
+        event.preventDefault(); // Prevent any default button behavior
+        localStorage.removeItem(`gallery_${this.galleryId}_private_id`);
+        window.location.href = `./index.html`;
+    }
+}
