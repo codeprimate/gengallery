@@ -14,3 +14,8 @@ exif_fields:
   - ExposureTime
   - FNumber
   - ISO
+aws:
+  access_key_id: YOUR_ACCESS_KEY_ID
+  secret_access_key: YOUR_SECRET_ACCESS_KEY
+  region: YOUR_REGION
+  bucket_name: YOUR_BUCKET_NAME
