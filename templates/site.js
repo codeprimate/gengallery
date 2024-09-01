@@ -81,6 +81,7 @@ class GalleryLogin {
                 this.redirectToGallery(assertedPrivateGalleryId);
             } else {
                 this.errorMessage.textContent = 'Incorrect password. Please try again.';
+                this.passwordInput.value = '';
                 this.errorMessage.classList.remove('hidden');
             }
         } catch (error) {

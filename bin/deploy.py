@@ -5,6 +5,7 @@ import sys
 import yaml
 import boto3
 import argparse
+import time
 from botocore.exceptions import ClientError
 import mimetypes
 
@@ -12,7 +13,7 @@ def load_config():
     with open('config.yaml', 'r') as f:
         return yaml.safe_load(f)
 
-class S3Deployer:
+class S3CloudFrontDeployer:
     def __init__(self, config):
         self.config = config
         self.s3_client = boto3.client(
@@ -21,7 +22,14 @@ class S3Deployer:
             aws_secret_access_key=self.config['aws']['secret_access_key'],
             region_name=self.config['aws']['region']
         )
-        self.bucket_name = self.config['aws']['bucket_name']
+        self.cloudfront_client = boto3.client(
+            'cloudfront',
+            aws_access_key_id=self.config['aws']['access_key_id'],
+            aws_secret_access_key=self.config['aws']['secret_access_key'],
+            region_name=self.config['aws']['region']
+        )
+        self.bucket_name = self.config['aws']['s3']['bucket_name']
+        self.distribution_id = self.config['aws']['cloudfront']['distribution_id']
 
     def check_bucket_access(self):
         try:
@@ -49,6 +57,7 @@ class S3Deployer:
     def sync_directory(self, local_dir):
         s3_files = self.get_s3_files()
         local_files = set()
+        changed_files = []
 
         for root, _, files in os.walk(local_dir):
             for file in files:
@@ -67,6 +76,7 @@ class S3Deployer:
                         ExtraArgs={'ContentType': content_type}
                     )
                     print(f"Uploaded: {s3_path} (Content-Type: {content_type})")
+                    changed_files.append(f'/{s3_path}')
                 else:
                     # Check if content type needs updating
                     s3_object = self.s3_client.head_object(Bucket=self.bucket_name, Key=s3_path)
@@ -79,6 +89,7 @@ class S3Deployer:
                             ContentType=content_type
                         )
                         print(f"Updated Content-Type: {s3_path} (Content-Type: {content_type})")
+                        changed_files.append(f'/{s3_path}')
                     else:
                         print(f"Skipped (unchanged): {s3_path}")
 
@@ -87,22 +98,50 @@ class S3Deployer:
             if s3_path not in local_files:
                 self.s3_client.delete_object(Bucket=self.bucket_name, Key=s3_path)
                 print(f"Deleted: {s3_path}")
+                changed_files.append(f'/{s3_path}')
+
+        return changed_files
+
+    def invalidate_cloudfront(self, changed_files):
+        if not changed_files:
+            print("No files changed. Skipping CloudFront invalidation.")
+            return
+
+        try:
+            response = self.cloudfront_client.create_invalidation(
+                DistributionId=self.distribution_id,
+                InvalidationBatch={
+                    'Paths': {
+                        'Quantity': len(changed_files),
+                        'Items': changed_files
+                    },
+                    'CallerReference': str(int(time.time()))
+                }
+            )
+            invalidation_id = response['Invalidation']['Id']
+            print(f"CloudFront invalidation created. Invalidation ID: {invalidation_id}")
+        except ClientError as e:
+            print(f"Error creating CloudFront invalidation: {e}")
 
     def deploy(self):
         print("*** Deploying to S3...")
         if not self.check_bucket_access():
             print("Deployment aborted.")
             return
-        self.sync_directory(os.path.join(self.config['output_path'], 'public_html'))
-        print("Deployment completed successfully.")
+        changed_files = self.sync_directory(os.path.join(self.config['output_path'], 'public_html'))
+        print("S3 deployment completed successfully.")
+
+        print("*** Invalidating CloudFront cache...")
+        self.invalidate_cloudfront(changed_files)
+        print("Deployment and invalidation process completed.")
 
 def main():
-    parser = argparse.ArgumentParser(description="Deploy static site to S3")
+    parser = argparse.ArgumentParser(description="Deploy static site to S3 and invalidate CloudFront")
     args = parser.parse_args()
 
     try:
         config = load_config()
-        deployer = S3Deployer(config)
+        deployer = S3CloudFrontDeployer(config)
         deployer.deploy()
     except Exception as e:
         print(f"Error: {str(e)}", file=sys.stderr)
