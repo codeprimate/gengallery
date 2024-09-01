@@ -28,7 +28,8 @@ def process_gallery(gallery_path, output_path):
         "name": gallery_id,
         "last_updated": datetime.now().isoformat(),
         "title": post_data.get('title', ''),
-        "date": post_data.get('date', '').strftime('%A, %B %d, %Y'),
+        "date": post_data.get('date', '').isoformat(),
+        "display_date": post_data.get('date', '').strftime('%A, %B %d, %Y'),
         "location": post_data.get('location', ''),
         "description": post_data.get('description', ''),
         "tags": post_data.get('tags', []),
@@ -103,8 +104,8 @@ def main():
             print(".",end="",flush=True)
             print("OK",flush=True)
 
-    # Sort galleries by title
-    galleries_data['galleries'].sort(key=lambda x: x['title'], reverse=True)
+    # Sort galleries by date
+    galleries_data['galleries'].sort(key=lambda x: x['date'], reverse=True)
 
     # Write galleries.json
     json_output_path = os.path.join(config['output_path'], 'galleries', 'galleries.json')
