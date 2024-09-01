@@ -1,12 +1,12 @@
+site_name: "My Photography Gallery"
+output_path: "./export"
+source_path: "./galleries"
+author: "My Name"
 image_sizes:
   cover: 1024
   thumbnail: 450
   full: 3840
 jpg_quality: 85
-output_path: "./export"
-source_path: "./galleries"
-galleries_per_page: 12
-images_per_gallery_page: 20
 exif_fields:
   - DateTimeOriginal
   - LensModel
@@ -14,5 +14,3 @@ exif_fields:
   - ExposureTime
   - FNumber
   - ISO
-site_name: "My Photography Gallery"
-author: "My Name"

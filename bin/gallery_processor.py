@@ -37,6 +37,21 @@ def process_gallery(gallery_path, output_path):
         "images": []
     }
 
+    # Process Security data
+    password = post_data.get('password','')
+    if password != '':
+        private_gallery_id = hashlib.sha256(f"{gallery_id}:{password}".encode('utf-8')).hexdigest()[:16]
+        gallery_data['private_gallery_id'] = private_gallery_id
+        private_gallery_id_hash = hashlib.sha256(private_gallery_id.encode('utf-8')).hexdigest()
+        gallery_data['private_gallery_id_hash'] = private_gallery_id_hash
+    else:
+        gallery_data['private_gallery_id'] = ''
+        gallery_data['private_gallery_id_hash'] = ''
+    if post_data.get('unlisted', False):
+        gallery_data['unlisted'] = True
+    else:
+        gallery_data['unlisted'] = False
+
     # Process cover image
     cover_image_filename = post_data.get('cover', '')
 
