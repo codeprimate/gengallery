@@ -13,8 +13,8 @@ def load_config():
         return yaml.safe_load(f)
 
 def load_galleries_data(output_path):
-    print("*** Loading data...",flush=True)
-    galleries_json_path = os.path.join(output_path, 'galleries', 'galleries.json')
+    print("*** Loading data...", flush=True)
+    galleries_json_path = os.path.join(output_path, 'metadata', 'galleries.json')
     with open(galleries_json_path, 'r') as f:
         return json.load(f)
 
@@ -22,7 +22,7 @@ def markdown_filter(text):
     return markdown.markdown(text)
 
 def generate_root_index(config, galleries_data, output_path):
-    print("*** Generating Index page...",flush=True)
+    print("*** Generating Index page...", flush=True)
     env = Environment(loader=FileSystemLoader('templates'))
     env.filters['markdown'] = markdown_filter
     template = env.get_template('index.html.jinja')
@@ -37,7 +37,8 @@ def generate_root_index(config, galleries_data, output_path):
 
     rendered_html = template.render(context)
 
-    output_file = os.path.join(output_path, 'index.html')
+    output_file = os.path.join(output_path, 'public_html', 'index.html')
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
     with open(output_file, 'w') as f:
         f.write(rendered_html)
 
@@ -58,7 +59,7 @@ def generate_gallery_pages(config, galleries_data, output_path):
         }
 
         # Generate gallery pages
-        gallery_dir = os.path.join(output_path, 'galleries', gallery['id'])
+        gallery_dir = os.path.join(output_path, 'public_html', 'galleries', gallery['id'])
         os.makedirs(gallery_dir, exist_ok=True)
 
         ### Gallery URL obfuscation for password protection
@@ -101,15 +102,14 @@ def generate_gallery_pages(config, galleries_data, output_path):
 
         print(f"Generated gallery page and {len(gallery['images'])} image pages for {gallery['title']}")
 
-
-def copy_static_files(config):
+def copy_static_files(config, output_path):
     # Create directories if they don't exist
-    os.makedirs(os.path.join(config['output_path'], 'css'), exist_ok=True)
-    os.makedirs(os.path.join(config['output_path'], 'js'), exist_ok=True)
+    os.makedirs(os.path.join(output_path, 'public_html', 'css'), exist_ok=True)
+    os.makedirs(os.path.join(output_path, 'public_html', 'js'), exist_ok=True)
 
     # Copy CSS file
     css_src = os.path.join('templates', 'site.css')
-    css_dest = os.path.join(config['output_path'], 'css', 'site.css')
+    css_dest = os.path.join(output_path, 'public_html', 'css', 'site.css')
     if os.path.exists(css_src):
         shutil.copy2(css_src, css_dest)
         print(f"*** Copied {css_src} to {css_dest}")
@@ -118,7 +118,7 @@ def copy_static_files(config):
 
     # Copy JS file
     js_src = os.path.join('templates', 'site.js')
-    js_dest = os.path.join(config['output_path'], 'js', 'site.js')
+    js_dest = os.path.join(output_path, 'public_html', 'js', 'site.js')
     if os.path.exists(js_src):
         shutil.copy2(js_src, js_dest)
         print(f"*** Copied {js_src} to {js_dest}")
@@ -127,10 +127,13 @@ def copy_static_files(config):
 
 def main():
     config = load_config()
+    os.makedirs(os.path.join(config['output_path'], 'public_html'), exist_ok=True)
+    os.makedirs(os.path.join(config['output_path'], 'metadata'), exist_ok=True)
+    
     galleries_data = load_galleries_data(config['output_path'])
     generate_root_index(config, galleries_data, config['output_path'])
     generate_gallery_pages(config, galleries_data, config['output_path'])
-    copy_static_files(config)
+    copy_static_files(config, config['output_path'])
     print("Root index.html, gallery pages generated, and static files copied successfully.")
 
 if __name__ == "__main__":

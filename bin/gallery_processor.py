@@ -11,11 +11,10 @@ with open('config.yaml', 'r') as f:
     config = yaml.safe_load(f)
 
 def generate_image_id(image_path, gallery_id):
-    # Generate a unique ID based on the image path and gallery ID
     unique_string = f"{gallery_id}:{image_path}"
     return hashlib.md5(unique_string.encode()).hexdigest()[:12]
 
-def process_gallery(gallery_path, output_path):
+def process_gallery(gallery_path):
     # Load gallery.yaml
     with open(os.path.join(gallery_path, 'gallery.yaml'), 'r') as f:
         post_data = yaml.safe_load(f)
@@ -58,7 +57,7 @@ def process_gallery(gallery_path, output_path):
     if cover_image_filename:
         image_path = os.path.join(gallery_id, cover_image_filename)
         cover_image_id = generate_image_id(cover_image_filename, gallery_id)
-        cover_metadata_path = os.path.join(output_path, 'metadata', f"{cover_image_id}.json")
+        cover_metadata_path = os.path.join(config['output_path'], 'metadata', gallery_id, f"{cover_image_id}.json")
 
         if os.path.exists(cover_metadata_path):
             with open(cover_metadata_path, 'r') as f:
@@ -85,7 +84,7 @@ def process_gallery(gallery_path, output_path):
             }
 
     # Process all images
-    metadata_dir = os.path.join(output_path, 'metadata')
+    metadata_dir = os.path.join(config['output_path'], 'metadata', gallery_id)
     for metadata_file in os.listdir(metadata_dir):
         if metadata_file.endswith('.json'):
             with open(os.path.join(metadata_dir, metadata_file), 'r') as f:
@@ -106,14 +105,14 @@ def main():
     for gallery in os.listdir(config['source_path']):
         gallery_name = os.path.splitext(os.path.basename(gallery))[0]
         source_path = os.path.join(config['source_path'], gallery_name)
-        output_path = os.path.join(config['output_path'], 'galleries', gallery_name)
         if os.path.isdir(source_path):
             print(f"*** Processing gallery {gallery_name}",end="",flush=True)
-            gallery_data = process_gallery(source_path, output_path)
+            gallery_data = process_gallery(source_path)
             print(".",end="",flush=True)
             galleries_data['galleries'].append(gallery_data)
             print(".",end="",flush=True)
-            gallery_json_output_path = os.path.join(output_path, 'index.json')
+            gallery_json_output_path = os.path.join(config['output_path'], 'metadata', gallery_name, 'index.json')
+            os.makedirs(os.path.dirname(gallery_json_output_path), exist_ok=True)
             with open(gallery_json_output_path, 'w') as f:
                 json.dump(gallery_data, f, indent=2)
             print(".",end="",flush=True)
@@ -123,7 +122,8 @@ def main():
     galleries_data['galleries'].sort(key=lambda x: x['date'], reverse=True)
 
     # Write galleries.json
-    json_output_path = os.path.join(config['output_path'], 'galleries', 'galleries.json')
+    json_output_path = os.path.join(config['output_path'], 'metadata', 'galleries.json')
+    os.makedirs(os.path.dirname(json_output_path), exist_ok=True)
     with open(json_output_path, 'w') as f:
         json.dump(galleries_data, f, indent=2)
 
