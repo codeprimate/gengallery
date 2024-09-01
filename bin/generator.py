@@ -44,11 +44,12 @@ def generate_root_index(config, galleries_data, output_path):
 def generate_gallery_pages(config, galleries_data, output_path):
     env = Environment(loader=FileSystemLoader('templates'))
     env.filters['markdown'] = markdown_filter
+    gallery_login_template = env.get_template('gallery_login.html.jinja')
     gallery_template = env.get_template('gallery.html.jinja')
     image_template = env.get_template('image.html.jinja')
 
     for gallery in galleries_data['galleries']:
-        # Generate gallery page
+        
         context = {
             'site_name': config['site_name'],
             'author': config['author'],
@@ -56,13 +57,26 @@ def generate_gallery_pages(config, galleries_data, output_path):
             'current_year': datetime.now().year
         }
 
-        rendered_html = gallery_template.render(context)
-
+        # Generate gallery pages
         gallery_dir = os.path.join(output_path, 'galleries', gallery['id'])
         os.makedirs(gallery_dir, exist_ok=True)
-        output_file = os.path.join(gallery_dir, 'index.html')
-        with open(output_file, 'w') as f:
-            f.write(rendered_html)
+
+        ### Gallery URL obfuscation for password protection
+        if gallery['private_gallery_id'] == '':
+            gallery_output_filename = 'index.html'
+        else:
+            # Render the gallery login page as the index page
+            gallery_output_filename = f"{gallery['private_gallery_id']}.html"
+            gallery_login_rendered_html = gallery_login_template.render(context)
+            gallery_login_output_file = os.path.join(gallery_dir, 'index.html')
+            with open(gallery_login_output_file, 'w') as f:
+                f.write(gallery_login_rendered_html)
+
+        ### Render Gallery page
+        gallery_output_file = os.path.join(gallery_dir, gallery_output_filename)
+        gallery_rendered_html = gallery_template.render(context)
+        with open(gallery_output_file, 'w') as f:
+            f.write(gallery_rendered_html)
 
         # Generate individual image pages
         for i, image in enumerate(gallery['images']):
