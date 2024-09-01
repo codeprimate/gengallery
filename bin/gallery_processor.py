@@ -86,7 +86,7 @@ def process_gallery(gallery_path):
     # Process all images
     metadata_dir = os.path.join(config['output_path'], 'metadata', gallery_id)
     for metadata_file in os.listdir(metadata_dir):
-        if metadata_file.endswith('.json'):
+        if (metadata_file != 'index.json' and metadata_file.endswith('.json')):
             with open(os.path.join(metadata_dir, metadata_file), 'r') as f:
                 image_metadata = json.load(f)
             gallery_data['images'].append(image_metadata)
