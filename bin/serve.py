@@ -11,7 +11,7 @@ def load_config():
 
 def run_server(port=8000):
     config = load_config()
-    export_path = config['output_path']
+    export_path = os.path.join(config['output_path'], 'public_html')
     
     if not os.path.isdir(export_path):
         print(f"Error: Export directory '{export_path}' not found.")
