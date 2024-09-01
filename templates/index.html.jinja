@@ -20,25 +20,27 @@
 
     <main class="container mx-auto px-4 py-8">
         {% for gallery in galleries %}
-        <section class="mb-12 bg-white rounded-lg shadow-md overflow-hidden">
-            <div class="md:flex">
-                <div class="md:flex-shrink-0 md:w-2/3 max-h-[40vh]">
-                    <a href="/galleries/{{ gallery.id }}/index.html">
-                        <img class="w-full h-64 object-cover md:h-full" src="{{ gallery.cover.path }}" alt="{{ gallery.title }}">
-                    </a>
-                </div>
-                <div class="p-8 md:w-1/3">
-                    <div class="uppercase tracking-wide text-sm text-indigo-500 font-semibold">{{ gallery.display_date }}</div>
-                    <a href="/galleries/{{ gallery.id }}/index.html" class="block mt-1 text-lg leading-tight font-medium text-black hover:underline">{{ gallery.title }}</a>
-                    <p class="mt-2 text-gray-500">{{ gallery.description }}</p>
-                    <div class="mt-4">
-                        {% for tag in gallery.tags %}
-                        <span class="inline-block bg-gray-200 rounded-full px-3 py-1 text-sm font-semibold text-gray-700 mr-2 mb-2">#{{ tag }}</span>
-                        {% endfor %}
+            {% if not gallery.unlisted %}
+            <section class="mb-12 bg-white rounded-lg shadow-md overflow-hidden">
+                <div class="md:flex">
+                    <div class="md:flex-shrink-0 md:w-2/3 max-h-[40vh]">
+                        <a href="/galleries/{{ gallery.id }}/index.html">
+                            <img class="w-full h-64 object-cover md:h-full" src="{{ gallery.cover.path }}" alt="{{ gallery.title }}">
+                        </a>
+                    </div>
+                    <div class="p-8 md:w-1/3">
+                        <div class="uppercase tracking-wide text-sm text-indigo-500 font-semibold">{{ gallery.display_date }}</div>
+                        <a href="/galleries/{{ gallery.id }}/index.html" class="block mt-1 text-lg leading-tight font-medium text-black hover:underline">{{ gallery.title }}</a>
+                        <p class="mt-2 text-gray-500">{{ gallery.description }}</p>
+                        <div class="mt-4">
+                            {% for tag in gallery.tags %}
+                            <span class="inline-block bg-gray-200 rounded-full px-3 py-1 text-sm font-semibold text-gray-700 mr-2 mb-2">#{{ tag }}</span>
+                            {% endfor %}
+                        </div>
                     </div>
                 </div>
-            </div>
-        </section>
+            </section>
+            {% endif %}
         {% endfor %}
     </main>
 
