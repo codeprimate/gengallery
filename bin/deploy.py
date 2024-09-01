@@ -6,6 +6,7 @@ import yaml
 import boto3
 import argparse
 from botocore.exceptions import ClientError
+import mimetypes
 
 def load_config():
     with open('config.yaml', 'r') as f:
@@ -14,7 +15,6 @@ def load_config():
 class S3Deployer:
     def __init__(self, config):
         self.config = config
-        print(self.config['aws'])
         self.s3_client = boto3.client(
             's3',
             aws_access_key_id=self.config['aws']['access_key_id'],
@@ -40,6 +40,12 @@ class S3Deployer:
                     s3_files[obj['Key']] = obj['Size']
         return s3_files
 
+    def guess_content_type(self, file_path):
+        content_type, _ = mimetypes.guess_type(file_path)
+        if file_path.endswith('.html') or file_path.endswith('.htm'):
+            return 'text/html'
+        return content_type or 'application/octet-stream'
+
     def sync_directory(self, local_dir):
         s3_files = self.get_s3_files()
         local_files = set()
@@ -52,11 +58,29 @@ class S3Deployer:
                 local_size = os.path.getsize(local_path)
                 local_files.add(s3_path)
 
+                content_type = self.guess_content_type(local_path)
                 if s3_path not in s3_files or s3_files[s3_path] != local_size:
-                    self.s3_client.upload_file(local_path, self.bucket_name, s3_path)
-                    print(f"Uploaded: {s3_path}")
+                    self.s3_client.upload_file(
+                        local_path, 
+                        self.bucket_name, 
+                        s3_path,
+                        ExtraArgs={'ContentType': content_type}
+                    )
+                    print(f"Uploaded: {s3_path} (Content-Type: {content_type})")
                 else:
-                    print(f"Skipped (unchanged): {s3_path}")
+                    # Check if content type needs updating
+                    s3_object = self.s3_client.head_object(Bucket=self.bucket_name, Key=s3_path)
+                    if s3_object.get('ContentType') != content_type:
+                        self.s3_client.copy_object(
+                            Bucket=self.bucket_name,
+                            CopySource={'Bucket': self.bucket_name, 'Key': s3_path},
+                            Key=s3_path,
+                            MetadataDirective='REPLACE',
+                            ContentType=content_type
+                        )
+                        print(f"Updated Content-Type: {s3_path} (Content-Type: {content_type})")
+                    else:
+                        print(f"Skipped (unchanged): {s3_path}")
 
         # Delete files that exist in S3 but not locally
         for s3_path in s3_files:
