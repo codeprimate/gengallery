@@ -54,10 +54,27 @@ def process_gallery(gallery_path):
     # Process all images
     metadata_dir = os.path.join(config['output_path'], 'metadata', gallery_id)
     for metadata_file in os.listdir(metadata_dir):
-        if (metadata_file != 'index.json' and metadata_file.endswith('.json')):
-            with open(os.path.join(metadata_dir, metadata_file), 'r') as f:
+        if metadata_file != 'index.json' and metadata_file.endswith('.json'):
+            metadata_path = os.path.join(metadata_dir, metadata_file)
+            with open(metadata_path, 'r') as f:
                 image_metadata = json.load(f)
-            gallery_data['images'].append(image_metadata)
+            
+            # Check if the original image still exists
+            original_image_path = os.path.join(gallery_path, image_metadata['filename'])
+            if os.path.exists(original_image_path):
+                gallery_data['images'].append(image_metadata)
+            else:
+                # Remove metadata file
+                os.remove(metadata_path)
+                
+                # Remove image files from output directories
+                for size_name in config['image_sizes'].keys():
+                    output_image_path = os.path.join(config['output_path'], 'public_html', 'galleries', gallery_id, size_name, f"{image_metadata['id']}.jpg")
+                    if os.path.exists(output_image_path):
+                        os.remove(output_image_path)
+                
+                print(f"Removed files for non-existent image: {image_metadata['filename']}")
+
 
     # Process cover image
     cover_image_filename = post_data.get('cover', '')

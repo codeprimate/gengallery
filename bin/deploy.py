@@ -104,6 +104,8 @@ class Deployer:
         return hash_md5.hexdigest()
 
     def invalidate_cloudfront(self):
+        self.changed_files.add('/')
+        
         if not self.distribution_id:
             print("No CloudFront distribution ID in config, skipping invalidation.")
             return
@@ -113,7 +115,6 @@ class Deployer:
 
         print("Invalidating CloudFront cache...")
         try:
-            self.changed_files.add('/')
             paths_to_invalidate = list(self.changed_files) 
             if self.default_root_object in paths_to_invalidate:
                 paths_to_invalidate.append('/')  # Invalidate root when default object changes
