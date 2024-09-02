@@ -74,12 +74,31 @@ def get_image_metadata(image_path):
             return yaml.safe_load(f)
     return {}
 
+def rotate_image(img, orientation):
+    if orientation == 2:
+        return img.transpose(Image.FLIP_LEFT_RIGHT)
+    elif orientation == 3:
+        return img.rotate(180)
+    elif orientation == 4:
+        return img.rotate(180).transpose(Image.FLIP_LEFT_RIGHT)
+    elif orientation == 5:
+        return img.rotate(-90, expand=True).transpose(Image.FLIP_LEFT_RIGHT)
+    elif orientation == 6:
+        return img.rotate(-90, expand=True)
+    elif orientation == 7:
+        return img.rotate(90, expand=True).transpose(Image.FLIP_LEFT_RIGHT)
+    elif orientation == 8:
+        return img.rotate(90, expand=True)
+    return img
+
 def process_image(image_path, gallery_id): 
     with Image.open(image_path) as img:
         filename = os.path.basename(image_path)
         image_id = generate_image_id(filename, gallery_id)
 
         exif_data = get_exif_data(img)
+        orientation = exif_data.get('Orientation', 1)
+        
         lat, lon = get_lat_lon(exif_data.get('GPSInfo'))
         if 'DateTimeOriginal' not in exif_data:
             file_mtime = os.path.getmtime(image_path)
@@ -115,6 +134,8 @@ def process_image(image_path, gallery_id):
             output_path = os.path.join(output_dir, f"{image_id}.jpg")
             if not os.path.exists(output_path):
                 img_copy = img.copy()
+                # Apply rotation only when creating the output file
+                img_copy = rotate_image(img_copy, orientation)
                 img_copy.thumbnail((max_size, max_size))
                 img_copy.save(output_path, "JPEG", quality=config['jpg_quality'])
 
