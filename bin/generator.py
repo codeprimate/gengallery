@@ -116,7 +116,7 @@ def generate_gallery_pages(config, galleries_data, output_path):
             with open(image_output_file, 'w') as f:
                 f.write(rendered_image_html)
 
-        print(f"Generated gallery page and {len(gallery['images'])} image pages for {gallery['title']}")
+        print(f"*** Generated gallery page and {len(gallery['images'])} image pages for {gallery['title']}")
 
 def generate_404_page(config, output_path):
     print("*** Generating 404 page...", flush=True)

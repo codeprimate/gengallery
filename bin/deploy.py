@@ -10,6 +10,7 @@ import mimetypes
 from boto3.s3.transfer import TransferConfig, S3Transfer
 from threading import Lock
 import time
+import hashlib
 
 def load_config():
     with open('config.yaml', 'r') as f:
@@ -66,10 +67,10 @@ class Deployer:
                     s3_obj = self.bucket.Object(s3_key)
                     s3_obj.load()
                     if s3_obj.content_length == os.path.getsize(local_path):
-                       if s3_obj.e_tag.strip('"') == self.get_local_etag(local_path):
-                            with self.print_lock:
-                                print(f"Skipped (unchanged): {s3_key}")
-                            continue
+                       #if s3_obj.e_tag.strip('"') == self.get_local_etag(local_path):
+                        with self.print_lock:
+                            print(f"Skipped (unchanged): {s3_key}")
+                        continue
                     else:
                         pass
                 except ClientError:
@@ -96,7 +97,6 @@ class Deployer:
                     print(f"Deleted: {obj.key}")
 
     def get_local_etag(self, file_path):
-        import hashlib
         hash_md5 = hashlib.md5()
         with open(file_path, "rb") as f:
             for chunk in iter(lambda: f.read(4096), b""):
@@ -113,7 +113,8 @@ class Deployer:
 
         print("Invalidating CloudFront cache...")
         try:
-            paths_to_invalidate = list(self.changed_files)
+            self.changed_files.add('/')
+            paths_to_invalidate = list(self.changed_files) 
             if self.default_root_object in paths_to_invalidate:
                 paths_to_invalidate.append('/')  # Invalidate root when default object changes
             
