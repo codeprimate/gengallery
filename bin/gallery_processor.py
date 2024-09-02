@@ -51,6 +51,14 @@ def process_gallery(gallery_path):
     else:
         gallery_data['unlisted'] = False
 
+    # Process all images
+    metadata_dir = os.path.join(config['output_path'], 'metadata', gallery_id)
+    for metadata_file in os.listdir(metadata_dir):
+        if (metadata_file != 'index.json' and metadata_file.endswith('.json')):
+            with open(os.path.join(metadata_dir, metadata_file), 'r') as f:
+                image_metadata = json.load(f)
+            gallery_data['images'].append(image_metadata)
+
     # Process cover image
     cover_image_filename = post_data.get('cover', '')
 
@@ -71,25 +79,7 @@ def process_gallery(gallery_path):
                 "thumbnail_path": cover_metadata['thumbnail_path'],
             }
         else:
-            gallery_data['cover'] = {
-                "image_path": image_path,
-                "cover_image_id": cover_image_id,
-                "cover_metadata_path": cover_metadata_path,
-                "id": cover_image_id,
-                "filename": cover_image_filename,
-                "title": '',
-                "caption": '',
-                "path": '',
-                "thumbnail_path": ''
-            }
-
-    # Process all images
-    metadata_dir = os.path.join(config['output_path'], 'metadata', gallery_id)
-    for metadata_file in os.listdir(metadata_dir):
-        if (metadata_file != 'index.json' and metadata_file.endswith('.json')):
-            with open(os.path.join(metadata_dir, metadata_file), 'r') as f:
-                image_metadata = json.load(f)
-            gallery_data['images'].append(image_metadata)
+            gallery_data['cover'] = gallery_data['images'][0]
 
     # Sort images by date taken if available
     gallery_data['images'].sort(key=lambda x: x['exif'].get('DateTimeOriginal', ''), reverse=True)
@@ -110,7 +100,6 @@ def main():
             gallery_data = process_gallery(source_path)
             print(".",end="",flush=True)
             galleries_data['galleries'].append(gallery_data)
-            print(".",end="",flush=True)
             gallery_json_output_path = os.path.join(config['output_path'], 'metadata', gallery_name, 'index.json')
             os.makedirs(os.path.dirname(gallery_json_output_path), exist_ok=True)
             with open(gallery_json_output_path, 'w') as f:
