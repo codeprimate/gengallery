@@ -78,12 +78,10 @@ def process_gallery(gallery_path):
 
     # Process cover image
     cover_image_filename = post_data.get('cover', '')
-
     if cover_image_filename:
         image_path = os.path.join(gallery_id, cover_image_filename)
         cover_image_id = generate_image_id(cover_image_filename, gallery_id)
-        cover_metadata_path = os.path.join(config['output_path'], 'metadata', gallery_id, f"{cover_image_id}.json")
-
+        cover_metadata_path = os.path.join(config['output_path'], 'metadata', gallery_id, f"{cover_image_id}.json") 
         if os.path.exists(cover_metadata_path):
             with open(cover_metadata_path, 'r') as f:
                 cover_metadata = json.load(f)
