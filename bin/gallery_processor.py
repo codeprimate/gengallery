@@ -25,9 +25,9 @@ def process_gallery(gallery_path):
     gallery_data = {
         "id": gallery_id,
         "name": gallery_id,
-        "last_updated": datetime.now().isoformat(),
+        "last_updated": datetime.now().strftime('%Y:%m:%d %H:%M:%S'),
         "title": post_data.get('title', ''),
-        "date": post_data.get('date', '').isoformat(),
+        "date": post_data.get('date', '').strftime('%Y:%m:%d %H:%M:%S'),
         "display_date": post_data.get('date', '').strftime('%A, %B %d, %Y'),
         "location": post_data.get('location', ''),
         "description": post_data.get('description', ''),
