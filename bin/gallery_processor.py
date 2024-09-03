@@ -99,6 +99,10 @@ def process_gallery(gallery_path):
     # Sort images by date taken if available
     gallery_data['images'].sort(key=lambda x: x['exif'].get('DateTimeOriginal', ''), reverse=True)
 
+    # Determine the latest updated timestamp of any files in the source gallery directory
+    latest_timestamp = max(os.path.getmtime(os.path.join(gallery_path, f)) for f in os.listdir(gallery_path) if os.path.isfile(os.path.join(gallery_path, f)))
+    gallery_data['last_updated'] = datetime.fromtimestamp(latest_timestamp).strftime('%Y:%m:%d %H:%M:%S')
+
     return gallery_data
 
 def main():
