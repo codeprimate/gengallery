@@ -29,7 +29,7 @@ class Deployer:
         self.bucket_name = self.config['aws']['s3']['bucket_name']
         self.bucket = self.s3.Bucket(self.bucket_name)
         self.distribution_id = self.config['aws']['cloudfront'].get('distribution_id')
-        self.default_root_object = self.config['aws']['cloudfront'].get('default_root_object', 'index.html')
+        self.default_root_object = 'index.html'
         self.transfer_config = TransferConfig(
             multipart_threshold=8 * 1024 * 1024,  # 8MB
             max_concurrency=10,

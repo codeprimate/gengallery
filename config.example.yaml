@@ -22,4 +22,3 @@ aws:
     bucket_name: XXX
   cloudfront:
     distribution_id: XXX
-    default_root_object: index.html
