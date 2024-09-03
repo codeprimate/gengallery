@@ -22,7 +22,7 @@
             {% if not gallery.unlisted %}
             <section class="mb-12 bg-white rounded-lg shadow-md overflow-hidden">
                 <div class="md:flex">
-                    <div class="md:flex-shrink-0 md:w-2/3 max-h-[40vh]">
+                    <div class="md:flex-shrink-0 md:w-2/3 max-h-[60vh]">
                         <a href="/galleries/{{ gallery.id }}/index.html">
                             <img class="w-full h-64 object-cover md:h-full" src="{{ gallery.cover.path }}" alt="{{ gallery.title }}">
                         </a>
@@ -39,7 +39,7 @@
                             <span class="inline-block bg-gray-200 rounded-full px-3 py-1 text-sm font-semibold text-gray-700 mr-2 mb-2">#{{ tag }}</span>
                             {% endfor %}
                         </div>
-                        <div class="mt-4 flex justify-between items-end">
+                        <div class="mt-4">
                             <p class="text-sm text-gray-600">
                                 {{ gallery.images|length }} image{% if gallery.images|length != 1 %}s{% endif %}
                             </p>
