@@ -10,7 +10,19 @@ import yaml
 from fractions import Fraction
 import hashlib
 
-SUPPORTED_FORMATS = ('.jpg', '.jpeg', '.png', '.webp', '.tiff')
+SUPPORTED_FORMATS = (
+    '.bmp',  # Windows Bitmap
+    '.gif',  # Graphics Interchange Format
+    '.ico',  # Windows Icon
+    '.jpg', '.jpeg', '.jpe',  # JPEG
+    '.pcx',  # PCX
+    '.png',  # Portable Network Graphics
+    '.ppm', '.pgm', '.pbm', '.pnm',  # Portable Pixmap formats
+    '.tga',  # TGA
+    '.tiff', '.tif',  # Tagged Image File Format
+    '.webp',  # WebP
+    '.xbm',  # X Bitmap
+)
 
 with open('config.yaml', 'r') as f:
     config = yaml.safe_load(f)

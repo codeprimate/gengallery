@@ -8,6 +8,7 @@ from jinja2 import Environment, FileSystemLoader
 from datetime import datetime
 import markdown
 import subprocess
+import hashlib
 
 def load_config():
     with open('config.yaml', 'r') as f:
@@ -37,26 +38,51 @@ def generate_tailwind_css():
     ], check=True)
     print("Tailwind CSS generated successfully.", flush=True)
 
-def generate_root_index(config, galleries_data, output_path):
-    print("*** Generating Index page...", flush=True)
-    env = Environment(loader=FileSystemLoader('templates'))
-    env.filters['markdown'] = markdown_filter
+def generate_tag_hash(tag):
+    return hashlib.sha256(tag.encode()).hexdigest()[:12]
+
+def generate_gallery_listing_pages(config, galleries_data, output_path, env):
+    print("*** Generating gallery listing pages...", flush=True)
     template = env.get_template('index.html.jinja')
+    all_tags = set()
+    tag_galleries = {}
 
-    context = {
-        'site_name': config['site_name'],
-        'author': config['author'],
-        'galleries': galleries_data['galleries'],
-        'current_year': datetime.now().year,
-        'last_updated': galleries_data['last_updated']
-    }
+    for gallery in galleries_data['galleries']:
+        for tag in gallery['tags']:
+            if gallery['unlisted']:
+                continue 
+            all_tags.add(tag)
+            if tag not in tag_galleries:
+                tag_galleries[tag] = []
+            tag_galleries[tag].append(gallery)
 
-    rendered_html = template.render(context)
+    for tag, galleries in tag_galleries.items():
+        context = {
+            'site_name': config['site_name'],
+            'author': config['author'],
+            'galleries': galleries,
+            'current_year': datetime.now().year,
+            'last_updated': galleries_data['last_updated'],
+            'tag': tag,
+            'all_tags': sorted(list(all_tags)),
+            'page_title': tag
+        }
 
-    output_file = os.path.join(output_path, 'public_html', 'index.html')
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)
-    with open(output_file, 'w') as f:
-        f.write(rendered_html)
+        rendered_html = template.render(context)
+        
+        tag_hash = generate_tag_hash(tag)
+        output_file = os.path.join(output_path, 'public_html', f'{tag_hash}.html')
+        
+        os.makedirs(os.path.dirname(output_file), exist_ok=True)
+        with open(output_file, 'w') as f:
+            f.write(rendered_html)
+
+        # Copy the 'featured' page to index.html
+        if tag == 'featured':
+            index_file = os.path.join(output_path, 'public_html', 'index.html')
+            shutil.copy2(output_file, index_file)
+
+    print(f"Generated {len(tag_galleries)} tag pages, including 'featured' page copied to index.html.")
 
 def generate_gallery_pages(config, galleries_data, output_path):
     env = Environment(loader=FileSystemLoader('templates'))
@@ -175,11 +201,16 @@ def main():
     generate_tailwind_css()
     
     galleries_data = load_galleries_data(config['output_path'])
-    generate_root_index(config, galleries_data, config['output_path'])
+    
+    env = Environment(loader=FileSystemLoader('templates'))
+    env.filters['markdown'] = markdown_filter
+    env.globals['generate_tag_hash'] = generate_tag_hash
+    
+    generate_gallery_listing_pages(config, galleries_data, config['output_path'], env)
     generate_gallery_pages(config, galleries_data, config['output_path'])
     generate_404_page(config, config['output_path'])
     copy_static_files(config, config['output_path'])
-    print("Root index.html, gallery pages, 404 page generated, and static files copied successfully.")
+    print("Gallery listing pages, gallery pages, 404 page generated, and static files copied successfully.")
 
 if __name__ == "__main__":
     main()
