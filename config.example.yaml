@@ -6,14 +6,7 @@ image_sizes:
   cover: 1024
   thumbnail: 450
   full: 3840
-jpg_quality: 85
-exif_fields:
-  - DateTimeOriginal
-  - LensModel
-  - FocalLength
-  - ExposureTime
-  - FNumber
-  - ISO
+jpg_quality: 90
 aws:
   access_key_id: XXX
   secret_access_key: XXX

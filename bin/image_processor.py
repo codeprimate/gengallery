@@ -11,6 +11,11 @@ import exif
 import yaml
 from fractions import Fraction
 import hashlib
+import warnings
+
+# Suppress specific warnings
+warnings.filterwarnings("ignore", category=Image.DecompressionBombWarning)
+warnings.filterwarnings("ignore", category=RuntimeWarning, message="ASCII tag contains -1 fewer bytes than specified")
 
 SUPPORTED_FORMATS = (
     '.bmp',  # Windows Bitmap
@@ -56,6 +61,7 @@ def get_exif_data(image_path):
     
     # Extract relevant EXIF data
     exif_fields = [
+        ('Orientation', 'orientation'),
         ('Make', 'make'),
         ('Model', 'model'),
         ('LensModel', 'lens_model'),
@@ -166,6 +172,8 @@ def process_image(image_path, gallery_id):
             output_path = os.path.join(output_dir, f"{image_id}.jpg")
             if not os.path.exists(output_path):
                 img_copy = img.copy()
+                orientation = exif_data.get('Orientation', 1)
+                img_copy = rotate_image(img_copy, orientation)
                 img_copy.thumbnail((max_size, max_size))
                 img_copy.save(output_path, "JPEG", quality=config['jpg_quality'])
 
