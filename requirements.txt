@@ -4,3 +4,4 @@ Jinja2
 markdown
 boto3
 botocore
+exif
