@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ site_name }}</title>
+    <title>{{ page_title }} - {{ site_name }}</title>
     <link href="/css/tailwind.css" rel="stylesheet">
     <link href="/css/site.css" rel="stylesheet">
 </head>
@@ -18,6 +18,7 @@
     </header>
 
     <main class="container mx-auto px-4 py-8">
+        <h2 class="text-2xl font-bold mb-4">#{{ page_title }}</h2>
         {% for gallery in galleries %}
             {% if not gallery.unlisted %}
             <section class="mb-12 bg-white rounded-lg shadow-md overflow-hidden">
@@ -29,14 +30,19 @@
                     </div>
                     <div class="p-8 md:w-1/3">
                         <div class="uppercase tracking-wide text-sm text-indigo-500 font-semibold">{{ gallery.display_date }}</div>
-                        <a href="/galleries/{{ gallery.id }}/index.html" class="block mt-1 text-lg leading-tight font-medium text-black hover:underline">
+                        <a href="/galleries/{{ gallery.id }}/index.html" class="block mt-1 text-lg leading-tight font-medium text-black hover:underline flex items-center">
                             {{ gallery.title }}
-                            
+                            {% if gallery.private_gallery_id %}
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 ml-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                            </svg>
+                            {% endif %}
                         </a>
                         <p class="mt-2 text-gray-500">{{ gallery.description }}</p>
                         <div class="mt-4">
                             {% for tag in gallery.tags %}
-                            <span class="inline-block bg-gray-200 rounded-full px-3 py-1 text-sm font-semibold text-gray-700 mr-2 mb-2">#{{ tag }}</span>
+                            <a href="/{{ generate_tag_hash(tag) }}.html" class="inline-block bg-gray-200 rounded-full px-3 py-1 text-sm font-semibold text-gray-700 mr-2 mb-2 hover:bg-gray-300 transition duration-300">#{{ tag }}</a>
                             {% endfor %}
                         </div>
                         <div class="mt-4">
@@ -49,20 +55,21 @@
                                 </svg>
                                 <span>{{ gallery.last_updated }}</span>
                             </p>
-                            {% if gallery.private_gallery_id %}
-                            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                            </svg>
-                            {% else %}
-                            <p></p>
-                            {% endif %}
                         </div>
                     </div>
                 </div>
             </section>
             {% endif %}
         {% endfor %}
+
+        <h2 class="text-2xl font-bold mb-4">Browse</h2>
+        <div class="flex flex-wrap gap-2 mb-8">
+            {% for other_tag in all_tags %}
+            <a href="/{{ generate_tag_hash(other_tag) }}.html" class="inline-block bg-blue-500 text-white rounded-full px-3 py-1 text-sm font-semibold hover:bg-blue-600 transition duration-300 {% if other_tag == tag %}bg-blue-700{% endif %}">
+                #{{ other_tag }}
+            </a>
+            {% endfor %}
+        </div>
     </main>
 
     <footer class="bg-white shadow-md mt-12">

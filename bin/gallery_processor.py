@@ -17,7 +17,7 @@ def generate_image_id(image_path, gallery_id):
 def process_gallery(gallery_path):
     # Load gallery.yaml
     with open(os.path.join(gallery_path, 'gallery.yaml'), 'r') as f:
-        post_data = yaml.safe_load(f)
+        gallery_config = yaml.safe_load(f)
 
     gallery_id = os.path.basename(gallery_path)
 
@@ -26,32 +26,32 @@ def process_gallery(gallery_path):
         "id": gallery_id,
         "name": gallery_id,
         "last_updated": datetime.now().strftime('%Y:%m:%d %H:%M:%S'),
-        "title": post_data.get('title', ''),
-        "date": post_data.get('date', '').strftime('%Y:%m:%d %H:%M:%S'),
-        "display_date": post_data.get('date', '').strftime('%A, %B %d, %Y'),
-        "location": post_data.get('location', ''),
-        "description": post_data.get('description', ''),
-        "tags": post_data.get('tags', []),
-        "content": post_data.get('content', ''),
+        "title": gallery_config.get('title', ''),
+        "date": gallery_config.get('date', '').strftime('%Y:%m:%d %H:%M:%S'),
+        "display_date": gallery_config.get('date', '').strftime('%A, %B %d, %Y'),
+        "location": gallery_config.get('location', ''),
+        "description": gallery_config.get('description', ''),
+        "tags": gallery_config.get('tags', []),
+        "content": gallery_config.get('content', ''),
         "images": []
     }
 
     # Process Security data
-    password = post_data.get('password','')
+    password = gallery_config.get('password','')
     if password != '':
         private_gallery_id = hashlib.sha256(f"{gallery_id}:{password}".encode('utf-8')).hexdigest()[:16]
-        gallery_data['private_gallery_id'] = private_gallery_id
         private_gallery_id_hash = hashlib.sha256(private_gallery_id.encode('utf-8')).hexdigest()
+        gallery_data['private_gallery_id'] = private_gallery_id
         gallery_data['private_gallery_id_hash'] = private_gallery_id_hash
     else:
         gallery_data['private_gallery_id'] = ''
         gallery_data['private_gallery_id_hash'] = ''
-    if post_data.get('unlisted', False):
+    if gallery_config.get('unlisted', False):
         gallery_data['unlisted'] = True
     else:
         gallery_data['unlisted'] = False
 
-    # Process all images
+    # Process image metadata
     metadata_dir = os.path.join(config['output_path'], 'metadata', gallery_id)
     for metadata_file in os.listdir(metadata_dir):
         if metadata_file != 'index.json' and metadata_file.endswith('.json'):
@@ -77,7 +77,7 @@ def process_gallery(gallery_path):
 
 
     # Process cover image
-    cover_image_filename = post_data.get('cover', '')
+    cover_image_filename = gallery_config.get('cover', '')
     if cover_image_filename:
         image_path = os.path.join(gallery_id, cover_image_filename)
         cover_image_id = generate_image_id(cover_image_filename, gallery_id)
