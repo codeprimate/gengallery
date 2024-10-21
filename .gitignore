@@ -5,3 +5,4 @@ export*/
 galleries*/*/**
 tmp/
 node_modules/
+bin/sync

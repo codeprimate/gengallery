@@ -193,6 +193,24 @@ def copy_static_files(config, output_path):
     else:
         print(f"Warning: {tailwind_src} not found")
 
+    # Copy favicon
+    favicon_src = os.path.join('templates', 'favicon.ico')
+    favicon_dest = os.path.join(output_path, 'public_html', 'favicon.ico')
+    if os.path.exists(favicon_src):
+        shutil.copy2(favicon_src, favicon_dest)
+        print(f"*** Copied {favicon_src} to {favicon_dest}")
+    else:
+        print(f"Warning: {favicon_src} not found")
+
+    # Copy robots.txt
+    robots_src = os.path.join('templates', 'robots.txt')
+    robots_dest = os.path.join(output_path, 'public_html', 'robots.txt')
+    if os.path.exists(robots_src):
+        shutil.copy2(robots_src, robots_dest)
+        print(f"*** Copied {robots_src} to {robots_dest}")
+    else:
+        print(f"Warning: {robots_src} not found")
+
 def main():
     config = load_config()
     os.makedirs(os.path.join(config['output_path'], 'public_html'), exist_ok=True)
