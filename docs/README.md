@@ -52,9 +52,37 @@ See `docs/example_gallery/waves.yaml` for an example:
 
 ## Deployment
 
-If you want to deploy to AWS:
-1. Configure AWS settings in `config.yaml`
-2. Run `bin/deploy.py` to deploy to S3 and invalidate CloudFront cache
+The project includes AWS deployment capabilities through S3 and CloudFront:
+
+1. Configure AWS settings in `config.yaml`:
+   ```yaml
+   aws:
+     access_key_id: YOUR_ACCESS_KEY_ID
+     secret_access_key: YOUR_SECRET_ACCESS_KEY
+     region: YOUR_AWS_REGION
+     s3:
+       bucket_name: YOUR_BUCKET_NAME
+     cloudfront:
+       distribution_id: YOUR_DISTRIBUTION_ID  # Optional
+   ```
+
+2. Run `bin/deploy.py` to deploy your site. The deployment process will:
+   - Upload new and modified files to S3
+   - Remove files from S3 that no longer exist locally
+   - Automatically detect content types for files
+   - Invalidate CloudFront cache (if distribution_id is configured)
+
+The deployment script includes smart file syncing that only uploads changed files, making deployments faster and more efficient.
+
+### Prerequisites for Deployment
+- AWS credentials with appropriate permissions for S3 and CloudFront
+- An S3 bucket configured for static website hosting
+- (Optional) A CloudFront distribution pointing to your S3 bucket
+
+### Troubleshooting
+- Ensure your AWS credentials have sufficient permissions
+- Verify your S3 bucket exists and is accessible
+- Check that your CloudFront distribution ID is correct if using CDN
 
 ## Requirements
 
