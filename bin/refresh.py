@@ -8,19 +8,33 @@ import yaml
 
 def run_command(command):
     print(f"Running: {' '.join(command)}")
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+        universal_newlines=True
+    )
 
     while True:
         output = process.stdout.readline()
-        if output == '' and process.poll() is not None:
-            break
+        error = process.stderr.readline()
+        
         if output:
             print(output.strip(), flush=True)
+        if error:
+            print(error.strip(), flush=True)
+            
+        if output == '' and error == '' and process.poll() is not None:
+            break
 
     rc = process.poll()
     if rc != 0:
         print(f"Error running {command[0]}:", flush=True)
-        print(process.stderr.read(), flush=True)
+        remaining_stderr = process.stderr.read()
+        if remaining_stderr:
+            print(remaining_stderr, flush=True)
         sys.exit(1)
 
 def load_config():
