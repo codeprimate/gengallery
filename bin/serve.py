@@ -3,6 +3,7 @@
 import os
 import sys
 import yaml
+import argparse
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 
 def load_config():
@@ -31,4 +32,9 @@ def run_server(port=8000):
         print("\nServer stopped.")
 
 if __name__ == "__main__":
-    run_server()
+    parser = argparse.ArgumentParser(description='Serve static files from the export directory')
+    parser.add_argument('--port', type=int, default=8000,
+                       help='Port to run the server on (default: 8000)')
+    args = parser.parse_args()
+    
+    run_server(port=args.port)
