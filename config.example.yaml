@@ -15,3 +15,11 @@ aws:
     bucket_name: XXX
   cloudfront:
     distribution_id: XXX
+ssh:
+  user: "admin"
+  host: "gallery.example.com"
+  destination: "/data/gallery/"
+  group: "www-data"
+  post_sync_commands:
+    - "chown -R {user}:{group} {destination}"
+    - "chmod -R go+rX {destination}"
