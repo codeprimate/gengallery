@@ -1,4 +1,3 @@
-
 # Gengallery
 
 Version 0.1
@@ -14,17 +13,59 @@ The rest you do is your business.
 ## Getting Started
 
 1. Copy `config.example.yaml` to `config.yaml` and make changes as desired.
-1. Run `pip install -r requirements.txt`
+2. Run `pip install -r requirements.txt`
+3. Install Node.js and npm (required for Tailwind CSS processing)
+4. Run `npm install` to install Tailwind CSS dependencies
 
 ## Usage
 
-1. Create a folder in `galleries`, and add a `gallery.yaml` (See the example gallery in `doc/example_gallery`)
-1. There are optional caption files for images (see example gallery).
-1. Run `bin/refresh.py --all` to update entire site, or if run for the first time
-1. Run `bin/refresh.py galleryname` to add/refresh that gallery
-1. Run `bin/serve.py` to start a webserver at http://localhost:8000
-1. It is safe to delete anything in `exports` as long as you run `bin/refresh.py --all` afterward
-1. Run `git pull` for updates and new features
+1. Create a folder in `galleries`, and add a `gallery.yaml` (See the example gallery in `docs/example_gallery`)
+2. There are optional caption files for images (see example gallery in `docs/example_gallery`).
+3. Run `bin/refresh.py --all` to update entire site, or if run for the first time
+4. Run `bin/refresh.py galleryname` to add/refresh that gallery
+5. Run `bin/serve.py` to start a webserver at http://localhost:8000
+6. It is safe to delete anything in `exports` as long as you run `bin/refresh.py --all` afterward
+7. Run `git pull` for updates and new features
+
+## Gallery Configuration
+
+Each gallery should have a `gallery.yaml` file with the following options:
+- `title`: Gallery title
+- `date`: Date of the gallery (YYYY-MM-DD format)
+- `location`: Location of the photos (optional)
+- `description`: Short description (optional)
+- `tags`: List of tags (include 'featured' to show on homepage)
+- `cover`: Filename of the cover image (optional, first image used if not specified)
+- `password`: Password protection for the gallery (optional)
+- `unlisted`: Set to true to hide from listings (optional)
+
+See `docs/example_gallery/gallery.yaml` for a complete example:
+
+## Image Metadata
+
+Each image can have an optional YAML metadata file (same name as image with .yaml extension):
+- `title`: Image title (defaults to filename if not specified)
+- `caption`: Image caption (optional)
+- `tags`: List of tags for the image (optional)
+
+See `docs/example_gallery/waves.yaml` for an example:
+
+## Deployment
+
+If you want to deploy to AWS:
+1. Configure AWS settings in `config.yaml`
+2. Run `bin/deploy.py` to deploy to S3 and invalidate CloudFront cache
+
+## Requirements
+
+- Python 3.8+
+- Node.js and npm (for Tailwind CSS)
+- PIL/Pillow
+- PyYAML
+- Jinja2
+- Python Markdown
+- boto3 (for AWS deployment)
+- exif
 
 # Copyright
 
