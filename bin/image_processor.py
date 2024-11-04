@@ -153,6 +153,7 @@ def process_image(image_path, gallery_id):
             "cover_path": f"/galleries/{gallery_id}/cover/{image_id}.jpg",
             "title": image_metadata.get('title', os.path.splitext(os.path.basename(image_path))[0].replace('_', ' ').title()),
             "caption": image_metadata.get('caption', ''),
+            "tags": image_metadata.get('tags', []),
             "lat": lat,
             "lon": lon,
             "exif": exif_data
@@ -183,8 +184,14 @@ def get_image_metadata(image_path):
     metadata_path = os.path.splitext(image_path)[0] + '.yaml'
     if os.path.exists(metadata_path):
         with open(metadata_path, 'r') as f:
-            return yaml.safe_load(f)
-    return {}
+            metadata = yaml.safe_load(f) or {}
+            # Ensure tags is always a list
+            if 'tags' in metadata and not isinstance(metadata['tags'], list):
+                metadata['tags'] = [metadata['tags']]
+            elif 'tags' not in metadata:
+                metadata['tags'] = []
+            return metadata
+    return {'tags': []}
 
 def rotate_image(img, orientation):
     if orientation == 2:
