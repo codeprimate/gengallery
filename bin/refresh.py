@@ -1,88 +1,68 @@
 #!/usr/bin/env python
 
-import os
+"""
+Refresh Script
+
+Coordinates the complete gallery processing pipeline by running:
+1. Image processing
+2. Gallery processing 
+3. Site generation
+"""
+
 import sys
-import subprocess
-import argparse
-import yaml
+import time
+from image_processor import main as process_images
+from gallery_processor import main as process_galleries
+from generator import main as generate_site
+from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
 
-def run_command(command):
-    print(f"Running: {' '.join(command)}")
-    process = subprocess.Popen(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        bufsize=1,
-        universal_newlines=True
-    )
-
-    while True:
-        output = process.stdout.readline()
-        error = process.stderr.readline()
-        
-        if output:
-            print(output.strip(), flush=True)
-        if error:
-            print(error.strip(), flush=True)
-            
-        if output == '' and error == '' and process.poll() is not None:
-            break
-
-    rc = process.poll()
-    if rc != 0:
-        print(f"Error running {command[0]}:", flush=True)
-        remaining_stderr = process.stderr.read()
-        if remaining_stderr:
-            print(remaining_stderr, flush=True)
-        sys.exit(1)
-
-def load_config():
-    with open('config.yaml', 'r') as f:
-        return yaml.safe_load(f)
-
-def list_galleries(config):
-    galleries = [d for d in os.listdir(config['source_path']) if os.path.isdir(os.path.join(config['source_path'], d))]
-    if galleries:
-        print("\nAvailable galleries:")
-        for gallery in galleries:
-            print(f"  - {gallery}")
-    else:
-        print("\nNo galleries found.")
-
-def refresh(gallery=None, all_galleries=False):
-    config = load_config()
-
-    if all_galleries:
-        run_command(["python", "bin/image_processor.py", "--all"])
-    elif gallery:
-        gallery_path = os.path.join(config['source_path'], gallery)
-        if not os.path.isdir(gallery_path):
-            print(f"Error: Gallery '{gallery}' not found.")
-            sys.exit(1)
-        run_command(["python", "bin/image_processor.py", gallery])
-    else:
-        return False
-
-    run_command(["python", "bin/gallery_processor.py"])
-    run_command(["python", "bin/generator.py"])
-    return True
+console = Console()
 
 def main():
-    parser = argparse.ArgumentParser(description="Refresh gallery and generate site")
-    parser.add_argument("gallery", nargs="?", help="Name of the gallery to refresh")
-    parser.add_argument("--all", action="store_true", help="Refresh all galleries")
+    """Run the complete refresh pipeline"""
+    try:
+        # Show welcome banner
+        title = Text("Refresh Galleries", style="bold cyan")
+        console.print(Panel(title, border_style="cyan"))
+        
+        start_time = time.time()
+        
+        # Preserve original args and modify for image processor
+        original_argv = sys.argv.copy()
+        
+        # If no gallery specified, process all
+        if len(sys.argv) == 1:
+            sys.argv = [sys.argv[0], '--all']
+        
+        # Image Processing
+        img_start = time.time()
+        process_images()
+        img_duration = time.time() - img_start
+        console.print(f"[green]✓ Image processing completed in {img_duration:.2f}s[/]")
+        
+        # Gallery Processing
+        gallery_start = time.time()
+        process_galleries()
+        gallery_duration = time.time() - gallery_start
+        console.print(f"[green]✓ Gallery processing completed in {gallery_duration:.2f}s[/]")
+        
+        # Site Generation
+        site_start = time.time()
+        generate_site()
+        site_duration = time.time() - site_start
+        console.print(f"[green]✓ Site generation completed in {site_duration:.2f}s[/]")
+        
+        total_duration = time.time() - start_time
+        console.print(f"\n[bold green]✨ Gallery Refresh completed successfully in {total_duration:.2f}s![/]")
 
-    args = parser.parse_args()
-
-    if args.all:
-        refresh(all_galleries=True)
-    elif args.gallery:
-        refresh(gallery=args.gallery)
-    else:
-        parser.print_help()
-        config = load_config()
-        list_galleries(config)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Gallery Refresh interrupted by user[/]")
+        sys.exit(130)
+    except Exception as e:
+        console.print(f"\n[red]Gallery Refresh failed: {str(e)}[/]")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

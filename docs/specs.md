@@ -106,11 +106,18 @@ cover: "sunset_panorama.jpg"
 ### image_processor.py
 - Reads configuration from config.yml
 - Processes each image in source galleries:
-  - Extracts EXIF data and GPS coordinates
-  - Resizes images for different uses (full-size, thumbnail, cover)
-  - Creates a metadata dictionary for each image
-  - Saves resized images in appropriate directories
-  - Saves a JSON metadata file for each image in the metadata directory
+  - Generates unique deterministic image IDs
+  - Extracts comprehensive EXIF data including camera settings and GPS coordinates
+  - Creates multiple sized versions of images (thumbnail, cover, full)
+  - Supports optional AES-CBC encryption with PBKDF2 key derivation
+  - Handles image rotation based on EXIF orientation
+  - Reads additional metadata from accompanying YAML files
+  - Saves processed images and metadata files
+  - Provides detailed progress tracking with rich console output
+- Supports both single gallery and batch processing modes
+- Exit codes:
+  - 0: All images processed successfully
+  - 3: One or more images failed to process
 
 ### gallery_processor.py
 - Reads configuration from config.yml
@@ -136,22 +143,30 @@ cover: "sunset_panorama.jpg"
 ### Image Metadata (JSON)
 ```json
 {
- "filename": "mountain_vista.jpg",
- "path": "/galleries/20240715/full/mountain_vista.jpg",
- "thumbnail_path": "/galleries/20240715/thumbnail/mountain_vista.jpg",
- "cover_path": "/galleries/20240715/cover/mountain_vista.jpg",
- "title": "Mountain Vista",
- "caption": "A breathtaking view of the Rocky Mountains at sunrise",
- "lat": 40.3772,
- "lon": -105.5217,
- "exif": {
-   "DateTimeOriginal": "2024:07:15 05:30:00",
-   "LensModel": "RF24-105mm F4 L IS USM",
-   "FocalLength": 28,
-   "ExposureTime": "1/125",
-   "FNumber": 8,
-   "ISO": 100
- }
+  "id": "a1b2c3d4e5f6",
+  "filename": "mountain_vista.jpg",
+  "url": "/galleries/20240715/a1b2c3d4e5f6.html",
+  "path": "/galleries/20240715/full/a1b2c3d4e5f6.jpg",
+  "thumbnail_path": "/galleries/20240715/thumbnail/a1b2c3d4e5f6.jpg",
+  "cover_path": "/galleries/20240715/cover/a1b2c3d4e5f6.jpg",
+  "title": "Mountain Vista",
+  "caption": "A breathtaking view of the Rocky Mountains at sunrise",
+  "tags": ["landscape", "mountains", "sunrise"],
+  "lat": 40.3772,
+  "lon": -105.5217,
+  "exif": {
+    "DateTimeOriginal": "2024:07:15 05:30:00",
+    "Make": "Canon",
+    "Model": "EOS R5",
+    "LensModel": "RF24-105mm F4 L IS USM",
+    "FocalLength": "28.0 mm",
+    "ExposureTime": "1/125",
+    "FNumber": "f/8.0",
+    "ISO": 100,
+    "ExposureCompensation": "0.0 EV",
+    "MeteringMode": "PATTERN",
+    "ExposureProgram": "MANUAL"
+  }
 }
 ```
 
