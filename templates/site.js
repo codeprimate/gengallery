@@ -153,6 +153,9 @@ class GalleryLock {
         this.openLock = this.lockIcon.querySelector('.open-lock');
         this.closedLock = this.lockIcon.querySelector('.closed-lock');
 
+        // Find any active EncryptedGallery instance
+        this.encryptedGallery = window._encryptedGallery;
+
         this.init();
     }
 
@@ -186,8 +189,26 @@ class GalleryLock {
      * @param {Event} event - Click event
      */
     handleLockClick(event) {
-        event.preventDefault(); // Prevent any default button behavior
+        event.preventDefault();
+
+        // Clean up encrypted gallery if it exists
+        if (this.encryptedGallery) {
+            this.encryptedGallery.cleanup();
+            window._encryptedGallery = null;
+        }
+
+        // Clear all sensitive data from localStorage
         localStorage.removeItem(`gallery_${this.galleryId}_private_id`);
+
+        // Clear any sensitive data from memory
+        this.privateGalleryId = null;
+        
+        // Force garbage collection hints on sensitive data
+        if (window.gc) {
+            window.gc();
+        }
+
+        // Redirect to login page
         window.location.href = `./index.html`;
     }
 }
@@ -235,6 +256,9 @@ class EncryptedGallery {
                 await this.handleFullImageClick(link);
             }
         });
+
+        // Store instance globally for access by GalleryLock
+        window._encryptedGallery = this;
     }
 
     /**
@@ -455,14 +479,24 @@ class EncryptedGallery {
     }
 
     /**
-     * Performs cleanup by revoking object URLs.
+     * Performs cleanup by revoking object URLs and clearing sensitive data.
      */
     cleanup() {
         // Revoke all object URLs
         for (const objectUrl of this.decryptedImages.values()) {
             URL.revokeObjectURL(objectUrl);
         }
+        
+        // Clear all collections
         this.decryptedImages.clear();
+        this.visibleImages.clear();
+        this.failedImages.clear();
+
+        // Clear sensitive data
+        this.privateGalleryId = null;
+        
+        // Remove references to DOM elements
+        this.options = null;
     }
 
     /**
@@ -522,32 +556,6 @@ class EncryptedGallery {
             const overlay = img.parentElement.querySelector(this.options.overlaySelector);
             if (overlay) overlay.style.display = 'none';
         }
-    }
-}
-
-/**
- * Converts a base64 string to an ArrayBuffer.
- * @param {string} base64 - Base64 encoded string
- * @returns {ArrayBuffer} Decoded array buffer
- * @throws {Error} If conversion fails
- */
-function base64ToArrayBuffer(base64) {
-    try {
-        const normalizedBase64 = base64.replace(/-/g, '+').replace(/_/g, '/');
-        let binary;
-        try {
-            binary = atob(normalizedBase64);
-        } catch (e) {
-            throw new Error(`Base64 decode failed: ${e.message}. First 50 chars of input: ${base64.substring(0, 50)}...`);
-        }
-        
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) {
-            bytes[i] = binary.charCodeAt(i);
-        }
-        return bytes.buffer;
-    } catch (e) {
-        throw new Error(`Base64 to ArrayBuffer conversion failed: ${e.message}`);
     }
 }
 
