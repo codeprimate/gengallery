@@ -1,5 +1,6 @@
 # Core dependencies
 Pillow>=9.0.0  # For image processing (PIL)
+pillow-heif>=0.13.0
 exif>=1.3.0    # For EXIF metadata handling
 pyyaml>=6.0.0  # For YAML configuration files
 rich>=12.0.0   # For console output formatting

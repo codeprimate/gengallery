@@ -4,7 +4,10 @@ location: "Point Nemo"
 tags:
   - example
   - deleteme
+  - featured
 cover: "map.jpg"
+unlisted: false
+encrypted: false
 description: |
     This is a description for the Example Gallery.
     

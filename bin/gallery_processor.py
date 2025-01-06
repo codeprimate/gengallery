@@ -96,6 +96,11 @@ def process_gallery(gallery_path: str) -> dict:
         gallery_config = yaml.safe_load(f)
 
     is_encrypted = gallery_config.get('encrypted', False)
+    password = gallery_config.get('password', False)
+    
+    # Validate password for encrypted galleries
+    if is_encrypted and not password:
+        raise ValueError(f"Gallery '{gallery_id}' is marked as encrypted but no password was provided")
 
     # Initialize gallery data
     gallery_data = {
@@ -114,7 +119,7 @@ def process_gallery(gallery_path: str) -> dict:
     }
 
     # Process Security data
-    password = gallery_config.get('password', '')
+    
     if password:
         # Generate private gallery ID for password-protected galleries
         private_gallery_id = hashlib.sha256(f"{gallery_id}:{password}".encode('utf-8')).hexdigest()[:16]
@@ -153,10 +158,11 @@ def process_gallery(gallery_path: str) -> dict:
     gallery_data['cover'] = None  # Initialize as None
     
     if cover_image_filename:
-        # Try to find cover image by filename first
+        # Try to find cover image by filename first (comparing basenames)
+        cover_basename = os.path.splitext(cover_image_filename)[0]
         cover_image = next(
             (img for img in gallery_data['images'] 
-             if img['filename'] == cover_image_filename),
+             if os.path.splitext(img['filename'])[0] == cover_basename),
             None
         )
         if cover_image:

@@ -9,65 +9,94 @@ This document outlines the specifications for a static photo gallery generator u
 ├── bin/
 │   ├── image_processor.py
 │   ├── gallery_processor.py
-│   └── generator.py
+│   ├── generator.py
+│   ├── deploy_ssh.py
+│   ├── deploy_aws.py
+│   ├── refresh.py
+│   ├── serve.py
+│   └── deploy_ssh.py
 ├── galleries/
 │   └── YYYYMMDD/
-│       ├── gallery.yml
-│       └─ *.jpg
+│       ├── gallery.yaml
+│       ├── *.yaml (optional image metadata)
+│       └── *.jpg
 ├── templates/
-│   ├── index.html.jinja
+│   ├── 404.html.jinja
 │   ├── gallery.html.jinja
+│   ├── gallery_login.html.jinja
+│   ├── encrypted_gallery.html.jinja
 │   ├── image.html.jinja
+│   ├── encrypted_image.html.jinja
+│   ├── index.html.jinja
 │   ├── site.css
-│   └── site.js
+│   ├── site.js
+│   ├── favicon.ico
+│   ├── robots.txt
+│   └── tailwind/
+│       ├── tailwind.config.js
+│       ├── tailwind_input.css
+│       └── tailwind.css (generated)
 ├── export/
-│   ├── index.html (generated)
-│   ├── galleries.json (generated)
-│   ├── css/
-│   │   └── site.css (copied)
-│   ├── js/
-│   │   └── site.js (copied)
-│   └── galleries/
-│       └── YYYYMMDD/
-│           ├── index.html (generated)
-│           ├── index.json (generated)
-│           ├── *.html (generated image pages)
-│           ├── cover/
-│           │   └── *.jpg (processed)
-│           ├── full/
-│           │   └── *.jpg (processed)
-│           ├── metadata/
-│           │   └── *.json (generated)
-│           └── thumbnail/
-│               └── *.jpg (processed)
-├── config.yml
+│   ├── metadata/
+│   │   ├── galleries.json
+│   │   └── YYYYMMDD/
+│   │       ├── index.json
+│   │       └── *.json
+│   └── public_html/
+│       ├── index.html
+│       ├── 404.html
+│       ├── *.html (tag pages)
+│       ├── favicon.ico
+│       ├── robots.txt
+│       ├── css/
+│       │   ├── site.css
+│       │   └── tailwind.css
+│       ├── js/
+│       │   └── site.js
+│       └── galleries/
+│           └── YYYYMMDD/
+│               ├── index.html
+│               ├── *.html (image pages)
+│               ├── cover/
+│               │   └── *.jpg
+│               ├── full/
+│               │   └── *.jpg
+│               └── thumbnail/
+│                   └── *.jpg
+├── config.yaml
 └── README.md
 ```
 
-## Configuration (config.yml)
+## Configuration (config.yaml)
 
 ```yaml
+# Image processing settings
 image_sizes:
   cover: 1024
   thumbnail: 300
   full: 3840
 jpg_quality: 85
+
+# Path configuration
 output_path: "./export"
 source_path: "./galleries"
-galleries_per_page: 999
-images_per_gallery_page: 999
-exif_fields:
-  - DateTimeOriginal
-  - LensModel
-  - FocalLength
-  - ExposureTime
-  - FNumber
-  - ISO
+
+# Site settings
 site_name: "My Photography Gallery"
 author: "Your Name"
+
+# SSH deployment settings (optional)
+ssh:
+  user: "admin"
+  host: "gallery.nil42.com"
+  destination: "/data/gallery/"
+  group: "www-data"
+  post_sync_commands:
+    - "chown -R {user}:{group} {destination}"
+    - "chmod -R 755 {destination}"
 ```
 
-## Gallery Post File (post.yml)
+## Gallery Configuration (gallery.yaml)
 
 ```yaml
 title: "Summer in the Mountains"
@@ -77,66 +106,103 @@ tags:
   - landscape
   - summer
   - mountains
-description: "A collection of photographs taken during a week-long hiking trip in the Rocky Mountains."
+  - featured
+description: "A collection of photographs taken during a week-long hiking trip."
 content: |
   ## Journey Through the Rockies
   
   This gallery showcases the stunning beauty of the Rocky Mountains 
-  during the height of summer. From sweeping vistas of snow-capped peaks 
-  to close-ups of delicate alpine flowers, each image tells a story of 
-  the raw, untamed wilderness.
-  
-  ### Highlights
-  
-  - Dawn at Eagle's Peak
-  - The hidden waterfall of Whisper Valley
-  - Sunset over the Continental Divide
-  
-  Throughout the week, we encountered diverse weather conditions, from 
-  brilliant sunshine to dramatic afternoon thunderstorms, each offering 
-  unique photographic opportunities.
-  
-  I hope these images inspire you to explore and appreciate the natural 
-  wonders that surround us.
+  during the height of summer.
 cover: "sunset_panorama.jpg"
+unlisted: false  # Optional: hide from main listing
+encrypted: false # Optional: enable encryption
+password: ""     # Optional: for password protection
+```
+
+## Featured Galleries
+
+Galleries can be marked as featured by adding the `featured` tag to the gallery's tags list. Featured galleries are displayed prominently on the home page in a dedicated section while still respecting `unlisted` and `encrypted` settings.
+
+Example featured gallery configuration:
+```yaml
+title: "Best of 2024"
+tags:
+  - featured
+  - landscape
+cover: "best_shot.jpg"
+# ... other configuration ...
 ```
 
 ## Script Functionalities
 
 ### image_processor.py
-- Reads configuration from config.yml
+- Reads configuration from config.yaml
 - Processes each image in source galleries:
   - Generates unique deterministic image IDs
-  - Extracts comprehensive EXIF data including camera settings and GPS coordinates
-  - Creates multiple sized versions of images (thumbnail, cover, full)
-  - Supports optional AES-CBC encryption with PBKDF2 key derivation
-  - Handles image rotation based on EXIF orientation
-  - Reads additional metadata from accompanying YAML files
-  - Saves processed images and metadata files
-  - Provides detailed progress tracking with rich console output
-- Supports both single gallery and batch processing modes
+  - Extracts EXIF data including camera settings
+  - Creates multiple sized versions of images
+  - Supports optional encryption for private galleries
+  - Handles image rotation based on EXIF
+  - Reads additional metadata from .yaml files
+  - Saves processed images and metadata
+- Provides rich console output with progress tracking
 - Exit codes:
-  - 0: All images processed successfully
-  - 3: One or more images failed to process
+  - 0: Success
+  - 1: No arguments provided
+  - 2: No galleries found
+  - 3: Processing errors occurred
+  - 130: Keyboard interrupt
 
 ### gallery_processor.py
-- Reads configuration from config.yml
+- Reads configuration from config.yaml
 - Processes each gallery:
-  - Reads gallery.yml for gallery information
+  - Reads gallery.yaml for configuration
   - Processes cover image metadata
-  - Loads and processes metadata for all images in the gallery
-  - Sorts images by date taken (if available in EXIF data)
-- Sorts galleries by date, most recent first
-- Generates a single galleries.json file with all gallery and image information
+  - Loads and processes all image metadata
+  - Handles encrypted and password-protected galleries
+  - Cleans up metadata for missing images
+- Generates consolidated galleries.json
+- Provides detailed console output
 
 ### generator.py
-- Reads configuration from config.yml
-- Loads processed gallery data from galleries.json
+- Reads configuration and processed gallery data
 - Generates HTML pages using Jinja2 templates:
-  - Root index.html (list of all galleries)
-  - Individual gallery index.html pages
+  - Main index page (tag-based navigation)
+  - Individual tag listing pages
+  - Gallery index pages (with optional login)
   - Individual image pages
-- Copies static files (CSS, JS) to the export directory
+  - 404 error page
+- Handles encrypted and password-protected galleries
+- Generates Tailwind CSS
+- Copies static assets
+- Provides build summary with statistics
+
+### deploy_ssh.py
+- Deploys generated site via SSH/rsync
+- Configurable host, user, and destination
+- Runs post-sync commands (permissions, etc.)
+- Uses SSH configuration from config.yaml
+
+### deploy_aws.py
+- Deploys generated site to AWS S3/CloudFront
+- Configurable bucket and distribution settings
+- Handles CloudFront cache invalidation
+- Uses AWS credentials from environment/config
+
+### refresh.py
+- Convenience script to rebuild the entire site
+- Runs the processing pipeline in sequence:
+  1. Process images
+  2. Process galleries
+  3. Generate site
+  4. Deploy (optional)
+- Provides consolidated output of all stages
+
+### serve.py
+- Local development server for testing
+- Serves the generated site from public_html directory
+- Supports live reload for development
+- Configurable port and host settings
 
 ## Data Structures
 
@@ -221,9 +287,145 @@ cover: "sunset_panorama.jpg"
 
 ## Workflow
 1. User populates source/galleries with new galleries and images
-2. User runs image_processor.py to process images and generate metadata
-3. User runs gallery_processor.py to generate galleries.json
-4. User runs generator.py to create HTML pages and copy static files
-5. Resulting static site is output to the export directory
+2. For development:
+   - Run `serve.py` to start local development server
+   - Make changes and preview in browser
+3. For production:
+   - Run `refresh.py` to rebuild entire site
+   - Optionally specify deployment target (SSH/AWS)
+4. Alternatively, run individual scripts as needed:
+   - `image_processor.py` to process new images
+   - `gallery_processor.py` to update gallery metadata
+   - `generator.py` to rebuild HTML/CSS
+   - `deploy_ssh.py` or `deploy_aws.py` to publish
 
 This system is designed to be flexible, easily extensible, and to generate a clean, responsive photo gallery website.
+
+## Gallery Security and Visibility
+
+Galleries support several visibility and security options:
+
+1. **Standard**: Public galleries visible in all navigation
+2. **Featured**: Marked with `featured` tag for homepage prominence
+3. **Unlisted**: Hidden from navigation but accessible via direct URL
+4. **Password Protected**: Requires authentication to view content
+5. **Encrypted**: Client-side AES-CBC encryption with password protection
+
+### Gallery Types
+
+1. **Standard Galleries**
+   - Publicly visible and listed in main navigation
+   - Accessible via direct URL
+   - Included in tag listings and RSS feeds
+   - Allows search engine indexing
+   - Example:
+   ```yaml
+   title: "Summer Vacation"
+   date: 2024-07-15
+   tags:
+     - travel
+     - summer
+   ```
+
+2. **Featured Galleries**
+   - Marked with the `featured` tag
+   - Displayed prominently on home page
+   - Inherits visibility rules from other settings (standard/unlisted/etc)
+   - Follows same security and access rules as base type
+   - Example:
+   ```yaml
+   title: "Best of 2024"
+   tags:
+     - featured
+     - landscape
+   ```
+
+3. **Unlisted Galleries**
+   - Hidden from main navigation, tag listings, and RSS feeds
+   - Accessible only via direct URL
+   - Blocked from search engine indexing via robots.txt
+   - Useful for work-in-progress or private sharing
+   - Example:
+   ```yaml
+   title: "Client Preview"
+   unlisted: true
+   tags:
+     - client
+     - wedding
+   ```
+
+4. **Password Protected Galleries**
+   - Requires password authentication to view content
+   - Listed in main index (unless also marked unlisted)
+   - Uses SHA-256 hashing for private gallery ID
+   - Content stored unencrypted but requires authentication
+   - Login state stored in browser session storage
+   - URL structure: `/galleries/YYYYMMDD/{private_gallery_id}.html`
+   - Search engines can only index login page
+   - Example:
+   ```yaml
+   title: "Wedding Photos"
+   password: "Smith2024"
+   tags:
+     - wedding
+     - private
+   ```
+
+5. **Encrypted Galleries**
+   - Uses client-side AES-CBC encryption with PBKDF2 key derivation
+   - All images and metadata encrypted
+   - Requires password for client-side decryption
+   - Automatically unlisted (hidden from all listings)
+   - No server-side decryption capability
+   - Deterministic IV generation for reproducible encryption
+   - Blocked from search engine indexing
+   - Example:
+   ```yaml
+   title: "Private Collection"
+   encrypted: true
+   password: "secret123"
+   tags:
+     - private
+   ```
+
+### Security Implementation
+
+#### Password Protection
+- Uses SHA-256 hashing to generate private gallery ID
+- Gallery content stored unencrypted but requires authentication
+- URL structure: `/galleries/YYYYMMDD/{private_gallery_id}.html`
+- Login state stored in browser session storage
+
+#### Encryption
+- AES-CBC encryption with PBKDF2 key derivation
+- All images decrypted client-side
+- Deterministic IV generation for reproducible encryption
+- No server-side decryption capability
+- URL structure matches password protection
+
+### Visibility Rules
+
+1. **Standard Galleries**
+   - Listed in: Main index, tag pages, RSS feeds
+   - Accessible: Public URLs
+   - Search indexing: Allowed
+
+2. **Featured Galleries**
+   - Additional listing: Home page featured section
+   - Otherwise follows standard or specified visibility
+
+3. **Unlisted Galleries**
+   - Listed in: Nothing
+   - Accessible: Direct URLs only
+   - Search indexing: Blocked via robots.txt
+
+4. **Password Protected**
+   - Listed in: Main index (if not unlisted)
+   - Accessible: After password entry
+   - Search indexing: Login page only
+
+5. **Encrypted**
+   - Always unlisted
+   - Listed in: Nothing
+   - Accessible: With password for decryption
+   - Search indexing: Blocked

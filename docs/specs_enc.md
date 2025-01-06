@@ -16,16 +16,39 @@ encrypted: true  # Only flag needed to enable encryption
 
 ### Key Generation and Authentication
 - **Private Gallery ID**: Generated as SHA-256(`galleryId:password`)[:16]
-- **Authentication**: Verified through private gallery ID hash match
-- **Encryption Key**: Private Gallery ID serves as encryption salt
-- **File Names**: Generated as SHA-256(`privateGalleryId:originalBasename`)[:16]
+- **Private Gallery ID Hash**: SHA-256(private_gallery_id) - stored for verification
+- **Encryption Key**: SHA-256(private_gallery_id)
+- **IV**: SHA-256(`imageId`)[:16] - unique per image
+- **Image ID**: For encrypted galleries: SHA-256(`galleryId:filename`)[:16]
+  For unencrypted galleries: MD5(`galleryId:filename`)[:12]
+
+### Gallery Metadata Structure
+The gallery metadata (stored in metadata/GALLERY_ID/index.json) includes:
+```json
+{
+  "id": "gallery_id",
+  "encrypted": true,
+  "private_gallery_id": "sha256_hash[:16]",  // First 16 chars of SHA-256(galleryId:password)
+  "private_gallery_id_hash": "sha256_hash",  // SHA-256(private_gallery_id) for verification
+  "unlisted": true,  // Encrypted galleries are always unlisted
+  // ... other standard gallery fields ...
+}
+```
+
+### Security Model Updates
+- Private gallery ID is never stored in metadata
+- Only the hash of the private gallery ID is stored for verification
+- Encrypted galleries are automatically marked as unlisted
+- Image IDs for encrypted galleries use SHA-256 instead of MD5
+- All encryption/decryption parameters are deterministically generated
+- No encryption keys or IVs are stored in metadata
 
 ### Security Guarantees
-- No unencrypted content in output directory
-- No password storage (only private gallery ID hash for verification)
+- No unencrypted content in output directory (except metadata)
+- Password never stored (only private gallery ID hash for verification)
+- Deterministic encryption allows for content verification
 - All encryption/decryption happens client-side
-- No server-side components required
-- Encrypted files are indistinguishable from random data
+- Each image has a unique IV derived from its ID
 - File names provide no information about original content
 
 ## File Structure
@@ -50,23 +73,22 @@ export/galleries/YYYYMMDD/
 ### Image Processing (image_processor.py)
 1. Check if gallery is encrypted from gallery.yml
 2. For encrypted galleries:
-   - Generate encrypted basenames using private gallery ID and original filename
-   - Process images normally (resize, extract EXIF)
-   - Remove any unencrypted images from output directories
-   - Store only encrypted versions with hashed filenames
+   - Generate image ID using SHA-256(`galleryId:filename`)[:16]
+   - Generate encryption key from private gallery ID
+   - Generate unique IV for each image from image ID
+   - Process and encrypt images
+   - Store minimal metadata without encryption parameters
 
 ### Gallery Processing (gallery_processor.py)
 1. For encrypted galleries:
-   - Generate private gallery ID from gallery ID and password
-   - Generate private gallery ID hash for verification
-   - Use private gallery ID for file naming and encryption
-   - Create login page (index.html)
-   - Create actual gallery page ({privateGalleryId}.html)
-2. Store minimal gallery metadata:
-   - Title
-   - Date
-   - Private gallery ID hash (for verification)
-   - No sensitive metadata
+   - Generate private gallery ID: SHA-256(`galleryId:password`)[:16]
+   - Generate verification hash: SHA-256(private_gallery_id)
+   - Store gallery metadata:
+     - Set encrypted: true
+     - Set unlisted: true automatically
+     - Store private gallery ID hash for verification
+     - Clear private gallery ID field
+     - Include standard gallery information
 
 ### HTML Generation (generator.py)
 1. Generate special template for encrypted galleries
@@ -78,79 +100,30 @@ export/galleries/YYYYMMDD/
 
 ### Encrypted Gallery Template (encrypted_gallery.html.jinja)
 The encrypted gallery template includes:
-
-```html
-<head>
-    <!-- Standard meta tags -->
-    <meta name="encrypted-gallery" content="true">
-</head>
-<body>
-    <!-- Gallery Header with Cover Image -->
-    <img class="encrypted-image" 
-         src="#encrypted-placeholder"
-         data-encrypted-url="{{ gallery.cover.path }}"
-         data-encrypted-type="cover"
-         alt="Encrypted Image">
-
-    <!-- Image Grid -->
-    <div class="grid">
-        {% for image in gallery.images %}
-        <div class="relative">
-            <img class="encrypted-image" 
-                 src="#encrypted-placeholder"
-                 data-encrypted-url="{{ image.thumbnail_path }}"
-                 data-encrypted-type="thumbnail"
-                 alt="Encrypted Image">
-            
-            <!-- Loading Overlay -->
-            <div class="encrypted-overlay">
-                <!-- Loading spinner SVG -->
-            </div>
-        </div>
-        {% endfor %}
-    </div>
-</body>
-```
+- Gallery header with encrypted cover image
+- Loading overlays with animated spinners
+- Image grid with encrypted thumbnails
+- SVG placeholders for initial image display
+- Navigation elements for gallery browsing
 
 ### Encrypted Single Image Template (encrypted_image.html.jinja)
 The single image view template includes:
-
-```html
-<body>
-    <!-- Main Image Container -->
-    <div class="relative">
-        <img class="encrypted-image" 
-             src="#encrypted-placeholder"
-             data-encrypted-url="{{ image.path }}"
-             data-encrypted-type="full"
-             alt="Encrypted Image">
-        
-        <!-- Navigation Thumbnails -->
-        {% if prev_image %}
-        <img class="nav-thumbnail encrypted-image" 
-             src="#encrypted-placeholder"
-             data-encrypted-url="{{ prev_image.thumbnail_path }}"
-             data-encrypted-type="thumbnail"
-             alt="Previous">
-        {% endif %}
-        
-        {% if next_image %}
-        <img class="nav-thumbnail encrypted-image" 
-             src="#encrypted-placeholder"
-             data-encrypted-url="{{ next_image.thumbnail_path }}"
-             data-encrypted-type="thumbnail"
-             alt="Next">
-        {% endif %}
-    </div>
-</body>
-```
+- Full-size encrypted image display
+- Previous/Next navigation arrows
+- Loading overlays with animated spinners
+- SVG placeholders for initial state
+- Full-screen image view support
 
 ### Template Features
 - Uses SVG placeholders for initial image display
-- Includes loading overlays with spinners
+- Includes loading overlays with animated spinners
 - Supports lazy loading through IntersectionObserver
 - Handles navigation between images
 - Manages memory through image type limits
+- Uses Tailwind CSS for styling
+- Includes data attributes for encryption type and content type
+- Provides responsive image grid layout
+- Implements full-screen image view with navigation
 
 ## Client-Side Implementation
 
@@ -179,19 +152,24 @@ new EncryptedGallery(galleryId, privateGalleryId, {
 
 ### Memory Management
 - Tracks decrypted images by type (full, cover, thumbnail)
-- Enforces strict limits per image type
+- Enforces strict limits per image type:
+  - Full size: 1 image
+  - Cover: 3 images
+  - Thumbnails: 10 images
 - Automatically revokes object URLs for off-screen images
-- Cleans up all resources on page unload
 
 ### Authentication Flow
-1. User visits gallery URL (index.html)
+1. User visits gallery URL
 2. Enters password
-3. Client-side generates private gallery ID
-4. If private gallery ID hash matches:
+3. Client-side generates:
+   - Private gallery ID = SHA-256(`galleryId:password`)[:16]
+   - Verification hash = SHA-256(private_gallery_id)
+4. If verification hash matches stored hash:
    - Save private gallery ID to localStorage
-   - Redirect to {privateGalleryId}.html
+   - Redirect to gallery page
 5. Gallery page uses stored private gallery ID to:
-   - Generate correct encrypted file paths
+   - Generate encryption key: SHA-256(private_gallery_id)
+   - Generate IVs for each image: SHA-256(`imageId`)[:16]
    - Decrypt content as needed
 
 ### Image Display

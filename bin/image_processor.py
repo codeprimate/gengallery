@@ -38,6 +38,7 @@ Returns:
 
 Requirements:
     PIL (Pillow)>=9.0.0
+    pillow-heif>=0.13.0
     exif>=1.3.0
     cryptography>=37.0.0
     rich>=12.0.0
@@ -67,14 +68,20 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskPr
 from rich.panel import Panel
 from rich.text import Text
 import sys
+from pillow_heif import register_heif_opener
 
 # Suppress specific warnings
 warnings.filterwarnings("ignore", category=Image.DecompressionBombWarning)
 warnings.filterwarnings("ignore", category=RuntimeWarning, message="ASCII tag contains -1 fewer bytes than specified")
+warnings.filterwarnings("ignore", category=UserWarning, message="Truncated File Read")
+
+# Register HEIF opener with Pillow
+register_heif_opener()
 
 SUPPORTED_FORMATS = (
     '.bmp',  # Windows Bitmap
     '.gif',  # Graphics Interchange Format
+    '.heic', '.heif',  # High Efficiency Image Format
     '.ico',  # Windows Icon
     '.jpg', '.jpeg', '.jpe',  # JPEG
     '.pcx',  # PCX

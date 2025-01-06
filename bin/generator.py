@@ -372,12 +372,16 @@ def main():
         console.print("\n[yellow]🔍 Found galleries:[/yellow]")
         for gallery in galleries_data['galleries']:
             num_images = len(gallery['images'])
-            status = []
-            if gallery.get('encrypted', False):
-                status.append("[red]🔒[/]")
+            status_icons = []
+            if 'featured' in gallery.get('tags', []):
+                status_icons.append("[yellow]⭐[/]")
             if gallery.get('unlisted', False):
-                status.append("[yellow]👁[/]")
-            status_str = " ".join(status)
+                status_icons.append("[yellow]🕶[/]")
+            if gallery.get('private_gallery_id', ''):
+                status_icons.append("[red]🔑[/]")
+            if gallery.get('encrypted', False):
+                status_icons.append("[red]🔒[/]")
+            status_str = " ".join(status_icons)
             console.print(f"  • [blue]{gallery['title']}[/] → [green]{num_images}[/] images {status_str}")
 
         console.print(f"\n[green]✓ Total: {len(galleries_data['galleries'])} galleries[/]")
@@ -420,6 +424,25 @@ def main():
         copy_static_files(config, config['output_path'], quiet=False)
         stage_times['finalize'] = datetime.now() - stage_start
         console.print(f"[green]✓[/green] [dim]Completed in {stage_times['finalize'].total_seconds():.1f}s[/dim]")
+
+        # Add password summary section
+        protected_galleries = [g for g in galleries_data['galleries'] if g.get('private_gallery_id')]
+        console.print(f"\n[bold blue]Password Protected Galleries ({len(protected_galleries)}):[/bold blue]")
+        if protected_galleries:
+            for gallery in protected_galleries:
+                # Load the gallery's YAML file to get the password
+                gallery_yaml_path = os.path.join('galleries', gallery['id'], 'gallery.yaml')
+                try:
+                    with open(gallery_yaml_path, 'r') as f:
+                        gallery_config = yaml.safe_load(f)
+                        password = gallery_config.get('password', 'No password found')
+                        console.print(f"[yellow]→[/yellow] [blue]{gallery['title']}[/blue]")
+                        console.print(f"  [red]Password:[/red] [bold]{password}[/bold]")
+                except FileNotFoundError:
+                    console.print(f"[yellow]→[/yellow] [blue]{gallery['title']}[/blue]")
+                    console.print(f"  [red]Error:[/red] Gallery YAML file not found")
+        else:
+            console.print("[dim]No password protected galleries found[/dim]")
 
     except Exception as e:
         any_errors = True
