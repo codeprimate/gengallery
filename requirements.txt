@@ -1,9 +1,15 @@
-Pillow
-PyYAML
-Jinja2
-markdown
-boto3
-botocore
-exif
-python-dateutil
-cryptography
+# Core dependencies
+Pillow>=9.0.0  # For image processing (PIL)
+exif>=1.3.0    # For EXIF metadata handling
+pyyaml>=6.0.0  # For YAML configuration files
+rich>=12.0.0   # For console output formatting
+Jinja2>=3.0.0  # For template rendering
+markdown>=3.4.0 # For markdown processing
+plum-py>=0.8.0 # For binary data handling (plum.exceptions)
+
+# AWS deployment dependencies
+boto3>=1.26.0  # For AWS S3 and CloudFront integration
+botocore>=1.29.0  # Required by boto3
+
+# Cryptography for encrypted galleries
+cryptography>=37.0.0  # For AES encryption/decryption
