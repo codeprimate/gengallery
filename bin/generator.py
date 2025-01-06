@@ -470,7 +470,6 @@ def main():
     paths_table.add_column("Size", style="magenta", justify="right")
     
     paths = [
-        ("Base Output", config['output_path']),
         ("Public HTML", public_html_path),
         ("Galleries", os.path.join(public_html_path, 'galleries')),
         ("CSS", os.path.join(public_html_path, 'css')),

@@ -386,55 +386,104 @@ def verify_encryption(encrypted_path: str, original_path: str, password: str) ->
     
     return True
 
+def extract_image_data(image_path: str, img_file, img: Image.Image) -> tuple[dict, float, float]:
+    """
+    Extract EXIF and location data from an image file.
+    
+    Args:
+        image_path: Path to the image file
+        img_file: Open file handle for raw EXIF extraction
+        img: PIL Image object for fallback EXIF extraction
+    
+    Returns:
+        tuple: (exif_data, latitude, longitude)
+    """
+    try:
+        exif_img = exif.Image(img_file)
+        exif_data = get_exif_data(image_path)
+        lat, lon = get_lat_lon(exif_img)
+    except (UnpackError, ValueError):
+        exif_data = get_pil_exif_data(img)  # Now img is properly defined
+        lat, lon = None, None
+    
+    # Handle missing date
+    if 'DateTimeOriginal' not in exif_data:
+        file_mtime = os.path.getmtime(image_path)
+        exif_data['DateTimeOriginal'] = datetime.fromtimestamp(file_mtime).strftime('%Y:%m:%d %H:%M:%S')
+    
+    return exif_data, lat, lon
+
+def create_metadata_dict(image_path: str, image_id: str, gallery_id: str, 
+                        exif_data: dict, lat: float, lon: float) -> dict:
+    """
+    Create the metadata dictionary for an image.
+    """
+    image_metadata = get_image_metadata(image_path)
+    filename = os.path.basename(image_path)
+    
+    return {
+        "id": image_id,
+        "filename": filename,
+        "url": f"/galleries/{gallery_id}/{image_id}.html",
+        "path": f"/galleries/{gallery_id}/full/{image_id}.jpg",
+        "thumbnail_path": f"/galleries/{gallery_id}/thumbnail/{image_id}.jpg",
+        "cover_path": f"/galleries/{gallery_id}/cover/{image_id}.jpg",
+        "title": image_metadata.get('title', os.path.splitext(filename)[0].replace('_', ' ').title()),
+        "caption": image_metadata.get('caption', ''),
+        "tags": image_metadata.get('tags', []),
+        "lat": lat,
+        "lon": lon,
+        "exif": exif_data
+    }
+
+def process_image_variants(img: Image.Image, image_id: str, gallery_id: str, 
+                         is_encrypted: bool, gallery_config: dict) -> None:
+    """
+    Process and save all size variants of an image.
+    """
+    for size_name, max_size in config['image_sizes'].items():
+        output_dir = os.path.join(config['output_path'], 'public_html', 'galleries', 
+                                gallery_id, size_name)
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, f"{image_id}.jpg")
+        
+        img_copy = img.copy()
+        img_copy.thumbnail((max_size, max_size))
+        
+        if is_encrypted:
+            temp_path = output_path + '.temp'
+            try:
+                # Save unencrypted version to temp file
+                img_copy.save(temp_path, "JPEG", quality=config['jpg_quality'])
+                
+                # Encrypt the file
+                key, iv = derive_encryption_params(gallery_id, image_id, gallery_config['password'])
+                encrypted_data = encrypt_file(temp_path, key, iv)
+                
+                # Write encrypted data
+                with open(output_path, 'wb') as f:
+                    f.write(encrypted_data)
+                
+                os.unlink(temp_path)
+            except Exception as e:
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+                raise ValueError(f"Encryption failed: {str(e)}")
+        else:
+            img_copy.save(output_path, "JPEG", quality=config['jpg_quality'])
+
 def process_image(image_path: str, gallery_id: str, gallery_config: dict, progress: Progress = None, 
                  image_number: int = None, total_images: int = None) -> dict:
     """
     Process a single image through the gallery preparation pipeline.
-
-    The processing pipeline includes:
-    1. Image validation and ID generation
-    2. EXIF metadata extraction
-    3. Multiple size variant creation
-    4. Optional encryption
-    5. Metadata storage
-
-    Args:
-        image_path: Path to source image file
-        gallery_id: Unique gallery identifier
-        gallery_config: Gallery configuration dict with:
-            - encrypted (bool): Enable encryption
-            - password (str, optional): Encryption password
-        progress: Optional rich.Progress instance
-        image_number: Current image number for progress
-        total_images: Total images being processed
-
-    Returns:
-        dict: Processed image metadata including:
-            - id: Unique image identifier
-            - filename: Original filename
-            - url: Web access URL
-            - paths: Variant image paths
-            - title/caption/tags: Image metadata
-            - lat/lon: GPS coordinates if available
-            - exif: Formatted EXIF data
-            If encrypted:
-            - encrypted: True
-            - salt/iv: Encryption parameters
-
-    Raises:
-        PIL.UnidentifiedImageError: Unsupported image format
-        OSError: File system access errors
-        ValueError: Invalid gallery configuration
     """
     filename = os.path.basename(image_path)
     
-    # Generate image ID early to check if processing is needed
-    if gallery_config.get('encrypted', False):
-        image_id = hashlib.sha256(f"{gallery_id}:{filename}".encode()).hexdigest()[:16]
-    else:
-        image_id = generate_image_id(filename, gallery_id)
+    # Generate image ID and check if processing needed
+    is_encrypted = gallery_config.get('encrypted', False)
+    image_id = (hashlib.sha256(f"{gallery_id}:{filename}".encode()).hexdigest()[:16] 
+                if is_encrypted else generate_image_id(filename, gallery_id))
 
-    # Check if processing is needed
     if check_output_files(image_path, gallery_id, image_id):
         if progress:
             task = progress.add_task(
@@ -444,126 +493,35 @@ def process_image(image_path: str, gallery_id: str, gallery_config: dict, progre
             progress.update(task, completed=100)
             progress.remove_task(task)
         
-        # Load and return existing metadata
-        metadata_path = os.path.join(
-            config['output_path'],
-            'metadata',
-            gallery_id,
-            f"{image_id}.json"
-        )
+        # Return existing metadata
+        metadata_path = os.path.join(config['output_path'], 'metadata', gallery_id, f"{image_id}.json")
         with open(metadata_path, 'r') as f:
             return json.load(f)
 
-    is_encrypted = gallery_config.get('encrypted', False)
-    
-    # Updated progress description with highlighted filename
     if progress:
         task = progress.add_task(
             f"[cyan]{filename}[/] ({image_number}/{total_images})",
-            total=100,
-            columns=[
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(),
-                TaskProgressColumn()
-            ]
+            total=100
         )
+        progress.update(task, completed=5)
 
-    # Opening image (5%)
     with Image.open(image_path) as img, open(image_path, 'rb') as img_file:
-        if progress:
-            progress.update(task, completed=5)
-
-        # Extract EXIF data (25%)
-        try:
-            exif_img = exif.Image(img_file)
-            exif_data = get_exif_data(image_path)
-            lat, lon = get_lat_lon(exif_img)
-        except (UnpackError, ValueError) as e:
-            exif_data = get_pil_exif_data(img)
-            lat, lon = None, None
+        # Extract EXIF and location data
+        exif_data, lat, lon = extract_image_data(image_path, img_file, img)
         if progress:
             progress.update(task, completed=25)
 
-        # Handle metadata (35%)
-        if 'DateTimeOriginal' not in exif_data:
-            file_mtime = os.path.getmtime(image_path)
-            exif_data['DateTimeOriginal'] = datetime.fromtimestamp(file_mtime).strftime('%Y:%m:%d %H:%M:%S')
-        image_metadata = get_image_metadata(image_path)
-        if progress:
-            progress.update(task, completed=35)
-
-        # Create metadata dictionary (40%)
-        output_metadata = {
-            "id": image_id,
-            "filename": filename,
-            "url": f"/galleries/{gallery_id}/{image_id}.html",
-            "path": f"/galleries/{gallery_id}/full/{image_id}.jpg",
-            "thumbnail_path": f"/galleries/{gallery_id}/thumbnail/{image_id}.jpg",
-            "cover_path": f"/galleries/{gallery_id}/cover/{image_id}.jpg",
-            "title": image_metadata.get('title', os.path.splitext(os.path.basename(image_path))[0].replace('_', ' ').title()),
-            "caption": image_metadata.get('caption', ''),
-            "tags": image_metadata.get('tags', []),
-            "lat": lat,
-            "lon": lon,
-            "exif": exif_data
-        }
+        # Create metadata dictionary
+        output_metadata = create_metadata_dict(image_path, image_id, gallery_id, exif_data, lat, lon)
         if progress:
             progress.update(task, completed=40)
 
-        # Process image sizes (40-90%)
-        size_count = len(config['image_sizes'])
-        for idx, (size_name, max_size) in enumerate(config['image_sizes'].items(), 1):
-            output_dir = os.path.join(config['output_path'], 'public_html', 'galleries', 
-                                    gallery_id, size_name)
-            os.makedirs(output_dir, exist_ok=True)
-            output_path = os.path.join(output_dir, f"{image_id}.jpg")
-            
-            img_copy = img.copy()
-            img_copy.thumbnail((max_size, max_size))
-            
-            if is_encrypted:
-                try:
-                    for size_name, max_size in config['image_sizes'].items():
-                        output_dir = os.path.join(config['output_path'], 'public_html', 'galleries', 
-                                                gallery_id, size_name)
-                        os.makedirs(output_dir, exist_ok=True)
-                        output_path = os.path.join(output_dir, f"{image_id}.jpg")
-                        
-                        # Save unencrypted version to temp file
-                        temp_path = output_path + '.temp'
-                        img_copy = img.copy()
-                        img_copy.thumbnail((max_size, max_size))
-                        img_copy.save(temp_path, "JPEG", quality=config['jpg_quality'])
-                        
-                        # Encrypt the file using private gallery ID
-                        key, iv = derive_encryption_params(
-                            gallery_id, 
-                            image_id, 
-                            gallery_config['password']
-                        )
-                        encrypted_data = encrypt_file(temp_path, key, iv)
-                        
-                        # Write encrypted data directly - don't prepend IV
-                        with open(output_path, 'wb') as f:
-                            f.write(encrypted_data)
-                        
-                        # Clean up temp file
-                        os.unlink(temp_path)
-                        
-                except Exception as e:
-                    if os.path.exists(temp_path):
-                        os.unlink(temp_path)
-                    raise ValueError(f"Encryption failed for {filename}: {str(e)}")
-            else:
-                img_copy.save(output_path, "JPEG", quality=config['jpg_quality'])
-            
-            if progress:
-                # Calculate progress for each size (50% of total progress spread across sizes)
-                size_progress = 40 + (50 * idx / size_count)
-                progress.update(task, completed=size_progress)
+        # Process image variants
+        process_image_variants(img, image_id, gallery_id, is_encrypted, gallery_config)
+        if progress:
+            progress.update(task, completed=90)
 
-        # Save metadata (100%)
+        # Save metadata
         metadata_dir = os.path.join(config['output_path'], 'metadata', gallery_id)
         os.makedirs(metadata_dir, exist_ok=True)
         metadata_path = os.path.join(metadata_dir, f"{image_id}.json")
