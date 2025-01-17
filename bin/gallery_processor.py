@@ -88,6 +88,54 @@ def cleanup_missing_image(gallery_id: str, image_metadata: dict, source_path: st
 def process_gallery(gallery_path: str) -> dict:
     """
     Process a single gallery directory and generate its metadata.
+
+    This function reads a gallery's configuration, processes its images, and generates
+    a comprehensive metadata structure for the gallery.
+
+    Args:
+        gallery_path (str): Path to the gallery directory containing gallery.yaml and images
+
+    Returns:
+        dict: A gallery metadata structure with the following format:
+            {
+                "id": str,                    # Unique gallery identifier (directory name)
+                "encrypted": bool,            # Whether gallery is password-protected
+                "name": str,                  # Gallery name (same as id)
+                "last_updated": str,          # Timestamp of last update (YYYY:MM:DD HH:MM:SS)
+                "title": str,                 # Gallery title from config
+                "date": str,                  # Gallery date (YYYY:MM:DD HH:MM:SS)
+                "display_date": str,          # Formatted date (e.g., "Monday, January 1, 2024")
+                "location": str,              # Gallery location from config
+                "description": str,           # Gallery description from config
+                "tags": List[str],            # List of gallery tags
+                "content": str,               # Additional content/notes
+                "images": List[dict],         # List of image metadata dictionaries
+                "private_gallery_id": str,    # Generated ID for password-protected galleries
+                "private_gallery_id_hash": str,# Hash of private gallery ID
+                "unlisted": bool,             # Whether gallery is hidden from listings
+                "cover": dict | None          # Cover image metadata or None
+            }
+
+    The cover image dictionary has the following structure:
+        {
+            "id": str,           # Unique image identifier
+            "filename": str,     # Original image filename
+            "title": str,        # Image title
+            "caption": str,      # Image caption
+            "path": str,         # Path to cover-sized image
+            "thumbnail_path": str # Path to thumbnail image
+        }
+
+    Raises:
+        ValueError: If gallery is marked as encrypted but no password is provided
+        FileNotFoundError: If gallery.yaml or required directories are missing
+        json.JSONDecodeError: If image metadata files are corrupted
+
+    Note:
+        - The function expects a gallery.yaml file in the gallery directory
+        - Images are sorted by EXIF DateTimeOriginal in reverse chronological order
+        - Missing source images are automatically cleaned up from the output
+        - The last_updated timestamp is based on the newest file in the gallery
     """
     gallery_id = os.path.basename(gallery_path)
     
