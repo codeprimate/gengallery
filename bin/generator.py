@@ -137,26 +137,133 @@ def generate_gallery_listing_pages(config, galleries_data, output_path, env, pro
         if progress and task:
             progress.advance(task)
 
+def get_gallery_templates(env):
+    """Get all templates needed for gallery generation.
+    
+    Args:
+        env (Environment): Jinja2 environment
+        
+    Returns:
+        dict: Dictionary of template objects
+    """
+    return {
+        'login': env.get_template('gallery_login.html.jinja'),
+        'gallery': env.get_template('gallery.html.jinja'),
+        'encrypted_gallery': env.get_template('encrypted_gallery.html.jinja'),
+        'image': env.get_template('image.html.jinja'),
+        'encrypted_image': env.get_template('encrypted_image.html.jinja')
+    }
+
+def get_gallery_config(gallery):
+    """Determine gallery configuration and templates to use.
+    
+    Args:
+        gallery (dict): Gallery metadata
+        
+    Returns:
+        dict: Configuration including output filename and template types
+    """
+    is_encrypted = gallery.get('encrypted', False)
+    has_password = bool(gallery.get('private_gallery_id', ''))
+    
+    if is_encrypted:
+        return {
+            'output_filename': f"{gallery['private_gallery_id']}.html",
+            'needs_login': True,
+            'gallery_template': 'encrypted_gallery',
+            'image_template': 'encrypted_image'
+        }
+    elif has_password:
+        return {
+            'output_filename': f"{gallery['private_gallery_id']}.html",
+            'needs_login': True,
+            'gallery_template': 'gallery',
+            'image_template': 'image'
+        }
+    else:
+        return {
+            'output_filename': 'index.html',
+            'needs_login': False,
+            'gallery_template': 'gallery',
+            'image_template': 'image'
+        }
+
+def generate_login_page(templates, context, gallery_dir):
+    """Generate login page for protected galleries.
+    
+    Args:
+        templates (dict): Template objects
+        context (dict): Template context
+        gallery_dir (str): Output directory path
+    """
+    login_html = templates['login'].render(context)
+    login_path = os.path.join(gallery_dir, 'index.html')
+    os.makedirs(os.path.dirname(login_path), exist_ok=True)
+    with open(login_path, 'w') as f:
+        f.write(login_html)
+
+def generate_gallery_index(templates, template_key, context, gallery_dir, output_filename):
+    """Generate main gallery index page.
+    
+    Args:
+        templates (dict): Template objects
+        template_key (str): Key for template to use
+        context (dict): Template context
+        gallery_dir (str): Output directory path
+        output_filename (str): Output filename
+    """
+    gallery_html = templates[template_key].render(context)
+    output_path = os.path.join(gallery_dir, output_filename)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, 'w') as f:
+        f.write(gallery_html)
+
+def generate_image_pages(templates, template_key, gallery, output_path, context):
+    """Generate individual image pages for a gallery.
+    
+    Args:
+        templates (dict): Template objects
+        template_key (str): Key for template to use
+        gallery (dict): Gallery metadata
+        output_path (str): Base output path
+        context (dict): Base template context
+    """
+    for i, image in enumerate(gallery['images']):
+        prev_image = gallery['images'][i-1] if i > 0 else None
+        next_image = gallery['images'][i+1] if i < len(gallery['images'])-1 else None
+
+        image_context = {
+            **context,
+            'image': image,
+            'prev_image': prev_image,
+            'next_image': next_image
+        }
+
+        rendered_html = templates[template_key].render(image_context)
+        output_file = os.path.join(
+            output_path,
+            'public_html',
+            f"galleries/{gallery['id']}/{image['id']}.html"
+        )
+        
+        os.makedirs(os.path.dirname(output_file), exist_ok=True)
+        with open(output_file, 'w') as f:
+            f.write(rendered_html)
+
 def generate_gallery_pages(config, galleries_data, output_path, progress=None, task=None):
     """Generate individual gallery and image pages.
 
-    Handles generation of regular, password-protected, and encrypted galleries,
-    including their login pages and individual image pages.
-
     Args:
-        config (dict): Site configuration data.
-        galleries_data (dict): Gallery metadata.
-        output_path (str): Base output directory path.
+        config (dict): Site configuration data
+        galleries_data (dict): Gallery metadata
+        output_path (str): Base output directory path
+        progress (Progress, optional): Progress bar instance
+        task (Task, optional): Progress task instance
     """
     env = Environment(loader=FileSystemLoader('templates'))
     env.filters['markdown'] = markdown_filter
     
-    # Load all required templates
-    gallery_login_template = env.get_template('gallery_login.html.jinja')
-    gallery_template = env.get_template('gallery.html.jinja')
-    encrypted_gallery_template = env.get_template('encrypted_gallery.html.jinja')
-    image_template = env.get_template('image.html.jinja')
-    encrypted_image_template = env.get_template('encrypted_image.html.jinja')
+    templates = get_gallery_templates(env)
 
     for gallery in galleries_data['galleries']:
         if progress:
@@ -176,18 +283,8 @@ def generate_gallery_pages(config, galleries_data, output_path, progress=None, t
             
             console.print(f"[yellow]→[/yellow] [blue]{gallery['title']}[/blue] {status_str} ({len(gallery['images'])} images)")
 
-        # Modify encrypted gallery handling
-        is_encrypted = gallery.get('encrypted', False)
-        # if is_encrypted:
-        #     # Instead of sanitizing, add encrypted-specific fields
-        #     encrypted_basename = hashlib.sha256(f"{gallery['private_gallery_id']}:{gallery['cover']['filename']}".encode()).hexdigest()[:16]
-        #     gallery['cover']['encrypted_filename'] = encrypted_basename
-            
-        #     # Add encrypted filename to each image
-        #     for image in gallery['images']:
-        #         encrypted_basename = hashlib.sha256(f"{gallery['private_gallery_id']}:{image['filename']}".encode()).hexdigest()[:16]
-        #         image['encrypted_filename'] = encrypted_basename
-
+        # Set up gallery configuration and context
+        gallery_config = get_gallery_config(gallery)
         context = {
             'site_name': config['site_name'],
             'author': config['author'],
@@ -195,82 +292,33 @@ def generate_gallery_pages(config, galleries_data, output_path, progress=None, t
             'current_year': datetime.now().year
         }
 
-        # Generate gallery pages
+        # Create gallery directory
         gallery_dir = os.path.join(output_path, 'public_html', 'galleries', gallery['id'])
         os.makedirs(gallery_dir, exist_ok=True)
 
-        ### Handle different gallery types
-        has_password = bool(gallery.get('private_gallery_id', ''))
-        
-        if is_encrypted:
-            gallery_output_filename = f"{gallery['private_gallery_id']}.html"
-            gallery_template_to_use = encrypted_gallery_template
-            image_template_to_use = encrypted_image_template
-            
-            # Generate login page
-            gallery_login_rendered_html = gallery_login_template.render(context)
-            gallery_login_output_file = os.path.join(gallery_dir, 'index.html')
-            with open(gallery_login_output_file, 'w') as f:
-                f.write(gallery_login_rendered_html)
-                
-        elif has_password:
-            gallery_output_filename = f"{gallery['private_gallery_id']}.html"
-            gallery_template_to_use = gallery_template
-            image_template_to_use = image_template
-            
-            # Generate login page
-            gallery_login_rendered_html = gallery_login_template.render(context)
-            gallery_login_output_file = os.path.join(gallery_dir, 'index.html')
-            with open(gallery_login_output_file, 'w') as f:
-                f.write(gallery_login_rendered_html)
-                
-        else:
-            gallery_output_filename = 'index.html'
-            gallery_template_to_use = gallery_template
-            image_template_to_use = image_template
-
-        ### Render Gallery page
-        gallery_output_file = os.path.join(gallery_dir, gallery_output_filename)
-        gallery_rendered_html = gallery_template_to_use.render(context)
-        with open(gallery_output_file, 'w') as f:
-            f.write(gallery_rendered_html)
-            
-        # Add status line for gallery index page
-        if is_encrypted or has_password:
+        # Generate login page if needed
+        if gallery_config['needs_login']:
+            generate_login_page(templates, context, gallery_dir)
             console.print(f"  [green]✓[/green] Login page: [blue]galleries/{gallery['id']}/index.html[/blue]")
-            console.print(f"  [green]✓[/green] Index page: [blue]galleries/{gallery['id']}/{gallery_output_filename}[/blue]")
-        else:
-            console.print(f"  [green]✓[/green] Index page: [blue]galleries/{gallery['id']}/index.html[/blue]")
 
-        # Generate individual image pages
-        for i, image in enumerate(gallery['images']):
-            prev_image = gallery['images'][i-1] if i > 0 else None
-            next_image = gallery['images'][i+1] if i < len(gallery['images'])-1 else None
+        # Generate gallery index
+        generate_gallery_index(
+            templates,
+            gallery_config['gallery_template'],
+            context,
+            gallery_dir,
+            gallery_config['output_filename']
+        )
+        console.print(f"  [green]✓[/green] Index page: [blue]galleries/{gallery['id']}/{gallery_config['output_filename']}[/blue]")
 
-            image_context = {
-                'site_name': config['site_name'],
-                'author': config['author'],
-                'gallery': gallery,
-                'image': image,
-                'prev_image': prev_image,
-                'next_image': next_image,
-                'current_year': datetime.now().year
-            }
-
-            rendered_image_html = image_template_to_use.render(image_context)
-            
-            # Use the path from metadata to construct the output file path
-            # Remove leading slash and add .html extension if not present
-            output_file = os.path.join(
-                output_path, 
-                'public_html', 
-                f"galleries/{gallery['id']}/{image['id']}.html"
-            )
-            
-            os.makedirs(os.path.dirname(output_file), exist_ok=True)
-            with open(output_file, 'w') as f:
-                f.write(rendered_image_html)
-
+        # Generate image pages
+        generate_image_pages(
+            templates,
+            gallery_config['image_template'],
+            gallery,
+            output_path,
+            context
+        )
         console.print(f"  [green]✓ {len(gallery['images'])}[/green] image pages")
 
         if progress and task:
