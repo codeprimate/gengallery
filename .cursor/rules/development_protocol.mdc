@@ -1,0 +1,200 @@
+---
+description: 
+alwaysApply: true
+---
+
+# Development Protocol
+
+You MUST follow this protocol for ALL development tasks. Do not skip steps. Do not proceed past a step until its conditions are met.
+
+**DIRECTIVE:** Always choose the simplest solution that completely solves the problem.
+
+---
+
+## Constraints
+
+Apply these constraints to ALL code you write:
+
+1. **Verify before reference.** Never assume functions, methods, attributes, or schema fields exist. Use tools to confirm before referencing.
+2. **No magic values.** Extract all strings and numbers into named constants or configuration.
+3. **Single responsibility.** Each component serves one clear purpose.
+4. **Explicit interfaces.** Define inputs, outputs, and error conditions.
+5. **Fail fast on bugs.** Let programming errors crash. Only catch exceptions for external systems, user input, or unreliable operations.
+
+---
+
+## Phase 1: Discovery
+
+Execute ALL of the following steps before writing any code.
+
+### Step 1.1: Research
+Use code search and file inspection tools. Investigate:
+- Similar implementations in this codebase
+- Current architecture and conventions
+- Available functions, methods, and APIs
+
+### Step 1.2: Verify Data Structures
+Use tools to inspect database schema and model definitions. Confirm every field you plan to reference exists.
+
+### Step 1.3: Understand Existing Logic
+Research why current code exists. Identify what problems it solved and what constraints it operates under.
+
+### Step 1.4: Identify Scope
+Determine and document:
+- What currently exists
+- What needs to change
+- The gap between current state and desired state
+
+### Step 1.5: Resolve Decision Points
+
+You MUST resolve each decision point in order. Do not proceed to Phase 2 until all are resolved.
+
+**1.5a: Is the problem statement clear?**
+- NO → STOP. Ask the user about edge cases, expected behavior, and constraints. Wait for their response. Then re-evaluate this step.
+- YES → Continue to 1.5b.
+
+**1.5b: Do multiple valid approaches exist?**
+- YES → STOP. Present the options with trade-offs to the user. Wait for their decision. Then continue to 1.5c.
+- NO → Continue to 1.5c.
+
+**1.5c: Are breaking changes required?**
+- YES → Use tools to count callers.
+  - More than 2 callers: STOP. Ask the user whether to maintain backwards compatibility or update all callers. Wait for their decision.
+  - 2 or fewer callers: Continue to 1.5d.
+- NO → Continue to 1.5d.
+
+**1.5d: Are authorization requirements clear?**
+- NO → STOP. Ask the user to clarify permissions. Do not proceed until clarified.
+- YES → Proceed to Phase 2.
+
+---
+
+## Phase 2: Implementation
+
+### Step 2.1: Determine Error Handling
+For each error case in your implementation, apply the correct strategy:
+
+| Error Type | How to Handle |
+|------------|---------------|
+| Programming error | Let exception bubble up |
+| External system failure | Try-catch with retry logic |
+| Invalid user input | Validate at system boundary |
+| Database operation | Use transactions, rollback on failure |
+
+### Step 2.2: Write Code
+Follow these rules:
+- Use dependency injection for testability
+- Define explicit interfaces with documented inputs and outputs
+- Extract all configuration values
+
+### Step 2.3: Write Tests
+- Test behavior and interfaces, not implementation details
+- Prioritize error conditions and edge cases
+- Use real objects unless testing external APIs, complex setup, or file operations
+- Maintain isolation between test cases
+
+### Step 2.4: Validate
+IF the project is Ruby on Rails: Execute these commands and fix any failures before proceeding:
+1. `standardrb`
+2. `RAILS_ENV=test bundle exec rspec [spec_file]`
+
+Do not proceed to Phase 3 until both pass.
+
+---
+
+## Phase 3: Criticism
+
+Execute this phase after completing each logical unit of work.
+
+### Step 3.1: Sanity Check
+Answer each question. If ANY answer is NO, return to Phase 1.
+- Does this approach align with the original problem?
+- Is this the simplest solution that works?
+- Will these interfaces make sense to future developers?
+
+### Step 3.2: Strategic Evaluation
+Confirm each item. If any is uncertain, investigate before proceeding.
+- Performance implications are acceptable
+- Security boundaries are maintained
+- Dependencies and ripple effects are understood
+
+### Step 3.3: Verify Code
+Use tools to confirm:
+- All referenced functions and methods exist
+- All referenced database attributes exist
+- Code follows established codebase patterns
+- Error handling matches error type per Step 2.1
+- Tests cover the implemented behavior
+
+If any verification fails, fix the issue before continuing.
+
+---
+
+## Phase 4: Refinement
+
+### Step 4.1: Check for Refinement Triggers
+If any trigger condition is true, take the specified action:
+
+| Condition | Action |
+|-----------|--------|
+| Sanity check revealed misalignment | Return to Phase 1 |
+| Implementation became complex | Simplify, or STOP and ask user to re-scope |
+| Tests revealed new edge cases | Return to Step 2.2 and adjust |
+| User provided feedback | Incorporate and re-run Phase 3 |
+
+### Step 4.2: Refine
+Apply these actions as needed:
+- **Simplify:** Remove unnecessary complexity
+- **Extract:** Pull out reusable components
+- **Consolidate:** Combine related functionality
+- **Document:** Add comments for complex decisions
+
+### Step 4.3: Pass Quality Gates
+All gates must pass. If any fails, return to the indicated phase.
+
+| Gate | If Failed |
+|------|-----------|
+| Requirements are clear and scope is appropriate | → Phase 1 |
+| Implementation follows established patterns | → Phase 2 |
+| Tests pass and cover critical paths | → Phase 2 |
+| Code is readable and maintainable | → Step 4.2 |
+
+---
+
+## Cycle Control
+
+### When to Return to Phase 1
+If ANY of these become true during implementation, STOP and return to Phase 1:
+- Requirements become ambiguous
+- User intent is unclear or has conflicting interpretations
+- You discover you don't understand why existing logic works the way it does
+- A function, method, or attribute you referenced doesn't exist
+- The approach is more complex than anticipated
+- New information changes your understanding of the problem
+- Impact of breaking changes is unclear
+
+### Completion Criteria
+Do not mark the task complete until ALL are true:
+- Problem is solved with minimal complexity
+- All quality gates pass
+- Future developers can understand and extend the code
+- Performance and security requirements are met
+
+### Final Checks
+Execute before marking complete:
+1. All tests pass
+2. `standardrb` passes
+3. Documentation is updated if interfaces changed
+
+---
+
+## Rails Tool Reference
+
+| Task | Tool or Command |
+|------|-----------------|
+| Research code | Code search and file inspection tools |
+| Inspect gem source | `bundle show [gem]` then examine files |
+| Query database | `psql` |
+| Inspect schema | Read `db/schema.rb` or migration files |
+| Validate style | `standardrb` |
+| Run tests | `RAILS_ENV=test bundle exec rspec` |
