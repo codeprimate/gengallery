@@ -266,6 +266,146 @@ class GalleryLock {
 }
 
 /**
+ * Envelope-v1 parsing helper.
+ */
+class EnvelopeV1 {
+    static MAGIC = 'PGE1';
+    static FORMAT_VERSION = 1;
+    static CRYPTO_SUITE_AES_256_GCM = 1;
+    static NONCE_LENGTH_BYTES = 12;
+    static MIN_TAG_LENGTH_BYTES = 16;
+
+    /**
+     * @param {ArrayBuffer} buffer
+     * @returns {{nonce: Uint8Array, ciphertextWithTag: Uint8Array, plaintextHeaderLength: number}}
+     */
+    static parse(buffer) {
+        const bytes = new Uint8Array(buffer);
+        if (bytes.length < 12 + this.NONCE_LENGTH_BYTES + this.MIN_TAG_LENGTH_BYTES) {
+            throw new Error('ERR_MANIFEST_INVALID');
+        }
+
+        const magic = String.fromCharCode(...bytes.slice(0, 4));
+        if (magic !== this.MAGIC) {
+            throw new Error('ERR_MANIFEST_INVALID');
+        }
+
+        const formatVersion = bytes[4];
+        const cryptoSuite = bytes[5];
+        if (formatVersion !== this.FORMAT_VERSION || cryptoSuite !== this.CRYPTO_SUITE_AES_256_GCM) {
+            throw new Error('ERR_UNSUPPORTED_ENVELOPE_VERSION');
+        }
+
+        const headerLength = (bytes[8] << 24) | (bytes[9] << 16) | (bytes[10] << 8) | bytes[11];
+        const nonceStart = 12 + headerLength;
+        const nonceEnd = nonceStart + this.NONCE_LENGTH_BYTES;
+        if (nonceEnd > bytes.length) {
+            throw new Error('ERR_MANIFEST_INVALID');
+        }
+
+        const ciphertextWithTag = bytes.slice(nonceEnd);
+        if (ciphertextWithTag.length < this.MIN_TAG_LENGTH_BYTES) {
+            throw new Error('ERR_DECRYPT_AUTH_FAILED');
+        }
+
+        return {
+            nonce: bytes.slice(nonceStart, nonceEnd),
+            ciphertextWithTag,
+            plaintextHeaderLength: headerLength
+        };
+    }
+}
+
+/**
+ * Bounded concurrency queue for decrypt jobs.
+ */
+class DecryptQueue {
+    constructor(maxConcurrent = 3) {
+        this.maxConcurrent = Math.max(1, maxConcurrent);
+        this.inFlight = 0;
+        this.pending = [];
+    }
+
+    enqueue(job) {
+        return new Promise((resolve, reject) => {
+            this.pending.push({ job, resolve, reject });
+            this.process();
+        });
+    }
+
+    process() {
+        while (this.inFlight < this.maxConcurrent && this.pending.length > 0) {
+            const next = this.pending.shift();
+            this.inFlight += 1;
+            Promise.resolve()
+                .then(next.job)
+                .then(next.resolve)
+                .catch(next.reject)
+                .finally(() => {
+                    this.inFlight -= 1;
+                    this.process();
+                });
+        }
+    }
+}
+
+/**
+ * Object URL cache with bounded size and revocation.
+ */
+class ObjectUrlCache {
+    constructor(maxEntries = 10) {
+        this.maxEntries = Math.max(1, maxEntries);
+        this.entries = new Map(); // key -> { objectUrl, ts }
+    }
+
+    has(key) {
+        return this.entries.has(key);
+    }
+
+    get(key) {
+        const entry = this.entries.get(key);
+        if (!entry) return null;
+        entry.ts = Date.now();
+        return entry.objectUrl;
+    }
+
+    set(key, blob) {
+        const existing = this.entries.get(key);
+        if (existing) {
+            URL.revokeObjectURL(existing.objectUrl);
+        }
+        const objectUrl = URL.createObjectURL(blob);
+        this.entries.set(key, { objectUrl, ts: Date.now() });
+        return objectUrl;
+    }
+
+    revoke(key) {
+        const entry = this.entries.get(key);
+        if (!entry) return;
+        URL.revokeObjectURL(entry.objectUrl);
+        this.entries.delete(key);
+    }
+
+    revokeAll() {
+        for (const entry of this.entries.values()) {
+            URL.revokeObjectURL(entry.objectUrl);
+        }
+        this.entries.clear();
+    }
+
+    evictInvisible(visibleKeys) {
+        if (this.entries.size <= this.maxEntries) return;
+        const candidates = Array.from(this.entries.entries())
+            .filter(([key]) => !visibleKeys.has(key))
+            .sort((a, b) => a[1].ts - b[1].ts);
+        for (const [key] of candidates) {
+            if (this.entries.size <= this.maxEntries) break;
+            this.revoke(key);
+        }
+    }
+}
+
+/**
  * Handles encrypted image loading and decryption in galleries.
  */
 class EncryptedGallery {
@@ -282,12 +422,13 @@ class EncryptedGallery {
             imageSelector: options.imageSelector || '.encrypted-image',
             overlaySelector: options.overlaySelector || '.encrypted-overlay',
             mode: options.mode || 'gallery',
-            maxBufferSize: options.maxBufferSize || 10 // Keep last 10 images in memory
+            maxBufferSize: options.maxBufferSize || 10, // Keep last 10 images in memory
+            maxConcurrentDecrypts: options.maxConcurrentDecrypts || 3
         };
 
-        // Simplified tracking - just keep decrypted URLs and failed images
-        this.visibleImages = new Set(); // Add tracking of visible images
-        this.decryptedImages = new Map(); // url -> objectUrl
+        this.visibleImages = new Set();
+        this.objectUrlCache = new ObjectUrlCache(this.options.maxBufferSize);
+        this.decryptQueue = new DecryptQueue(this.options.maxConcurrentDecrypts);
         this.failedImages = new Set();
         this.errorLogCount = 0;
         this.maxErrorLogs = 5;
@@ -328,12 +469,8 @@ class EncryptedGallery {
             const url = mainImage.dataset.encryptedUrl;
             const decryptedBlob = await this.fetchAndDecrypt(url);
             
-            const objectUrl = URL.createObjectURL(decryptedBlob);
+            const objectUrl = this.objectUrlCache.set(url, decryptedBlob);
             mainImage.src = objectUrl;
-            
-            // Store in our Map instead of the old .full collection
-            this.decryptedImages.set(url, objectUrl);
-            
             if (overlay) overlay.style.display = 'none';
 
             await this.decryptNavigationThumbnails();
@@ -358,10 +495,8 @@ class EncryptedGallery {
                 try {
                     const url = thumb.dataset.encryptedUrl;
                     const decryptedBlob = await this.fetchAndDecrypt(url);
-                    const objectUrl = URL.createObjectURL(decryptedBlob);
+                    const objectUrl = this.objectUrlCache.set(url, decryptedBlob);
                     thumb.src = objectUrl;
-                    // Store in our Map instead of the old .thumbnail collection
-                    this.decryptedImages.set(url, objectUrl);
                 } catch (error) {
                     console.error('Navigation thumbnail decryption failed:', error);
                 }
@@ -431,8 +566,8 @@ class EncryptedGallery {
 
         try {
             // Check if already decrypted
-            if (this.decryptedImages.has(url)) {
-                img.src = this.decryptedImages.get(url);
+            if (this.objectUrlCache.has(url)) {
+                img.src = this.objectUrlCache.get(url);
                 if (overlay) overlay.style.display = 'none';
                 return;
             }
@@ -444,8 +579,7 @@ class EncryptedGallery {
                 throw new Error('Invalid image data');
             }
 
-            const objectUrl = URL.createObjectURL(decryptedBlob);
-            this.decryptedImages.set(url, objectUrl);
+            const objectUrl = this.objectUrlCache.set(url, decryptedBlob);
             
             img.src = objectUrl;
             img.srcset = '';
@@ -484,66 +618,43 @@ class EncryptedGallery {
     }
 
     cleanupExcessImages() {
-        // Don't cleanup if we're under the buffer size
-        if (this.decryptedImages.size <= this.options.maxBufferSize) return;
-
-        // Get all decrypted URLs that aren't currently visible
-        const invisibleUrls = Array.from(this.decryptedImages.keys())
-            .filter(url => !this.visibleImages.has(url));
-
-        // Sort by when they were last visible (if we tracked that)
-        // For now, just remove the first ones up to the buffer size
-        const urlsToRemove = invisibleUrls.slice(
-            0, 
-            this.decryptedImages.size - this.options.maxBufferSize
-        );
-
-        for (const url of urlsToRemove) {
-            const objectUrl = this.decryptedImages.get(url);
-            URL.revokeObjectURL(objectUrl);
-            this.decryptedImages.delete(url);
-        }
+        this.objectUrlCache.evictInvisible(this.visibleImages);
     }
 
     /**
      * Fetches and decrypts an encrypted image.
      */
     async fetchAndDecrypt(url) {
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        
-        const encryptedData = await response.arrayBuffer();
-        const imageId = url.split('/').pop().split('.')[0];
-        if (!this.storageToken) {
-            throw new Error('Missing storage token');
-        }
-        
-        const { key, iv } = await deriveEncryptionParams(
-            this.galleryId, 
-            imageId, 
-            this.storageToken
-        );
-        
-        const decrypted = await crypto.subtle.decrypt(
-            { name: 'AES-CBC', iv },
-            key,
-            encryptedData
-        );
-        
-        return new Blob([decrypted], { type: 'image/jpeg' });
+        return this.decryptQueue.enqueue(async () => {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error('ERR_MANIFEST_INVALID');
+
+            if (!this.storageToken) {
+                throw new Error('ERR_BAD_PASSWORD_OR_TOKEN');
+            }
+
+            const encryptedData = await response.arrayBuffer();
+            const envelope = EnvelopeV1.parse(encryptedData);
+            const key = await deriveEncryptionParams(this.galleryId, this.storageToken);
+
+            try {
+                const decrypted = await crypto.subtle.decrypt(
+                    { name: 'AES-GCM', iv: envelope.nonce },
+                    key,
+                    envelope.ciphertextWithTag
+                );
+                return new Blob([decrypted], { type: 'image/jpeg' });
+            } catch (error) {
+                throw new Error('ERR_DECRYPT_AUTH_FAILED');
+            }
+        });
     }
 
     /**
      * Performs cleanup by revoking object URLs and clearing sensitive data.
      */
     cleanup() {
-        // Revoke all object URLs
-        for (const objectUrl of this.decryptedImages.values()) {
-            URL.revokeObjectURL(objectUrl);
-        }
-        
-        // Clear all collections
-        this.decryptedImages.clear();
+        this.objectUrlCache.revokeAll();
         this.visibleImages.clear();
         this.failedImages.clear();
 
@@ -552,6 +663,8 @@ class EncryptedGallery {
         
         // Remove references to DOM elements
         this.options = null;
+        this.objectUrlCache = null;
+        this.decryptQueue = null;
     }
 
     /**
@@ -586,8 +699,8 @@ class EncryptedGallery {
             if (overlay) overlay.style.display = 'flex';
 
             // Check if already decrypted
-            if (this.decryptedImages.has(fullUrl)) {
-                window.open(this.decryptedImages.get(fullUrl));
+            if (this.objectUrlCache.has(fullUrl)) {
+                window.open(this.objectUrlCache.get(fullUrl));
                 return;
             }
 
@@ -598,8 +711,7 @@ class EncryptedGallery {
                 throw new Error('Invalid image data');
             }
 
-            const objectUrl = URL.createObjectURL(decryptedBlob);
-            this.decryptedImages.set(fullUrl, objectUrl);
+            const objectUrl = this.objectUrlCache.set(fullUrl, decryptedBlob);
             
             // Open in new tab
             window.open(objectUrl);
@@ -617,26 +729,17 @@ class EncryptedGallery {
 /**
  * Derives encryption parameters for decrypting gallery images.
  * @param {string} galleryId - Gallery ID
- * @param {string} imageId - Image ID 
  * @param {string} storageToken - Storage token used as key material
- * @returns {Promise<{key: CryptoKey, iv: Uint8Array}>}
+ * @returns {Promise<CryptoKey>}
  */
-async function deriveEncryptionParams(galleryId, imageId, storageToken) {
+async function deriveEncryptionParams(galleryId, storageToken) {
     const storageTokenBytes = base64urlToBytes(storageToken);
     const imageKeyBytes = await deriveImageKeyBytes(storageTokenBytes, galleryId);
-    
-    // Get IV from image ID hash (matching Python)
-    const ivBuffer = await crypto.subtle.digest('SHA-256', utf8Bytes(imageId));
-    const iv = new Uint8Array(ivBuffer.slice(0, 16));
-    
-    // Import the derived bits as an AES-CBC key
-    const key = await crypto.subtle.importKey(
+    return crypto.subtle.importKey(
         'raw',
         imageKeyBytes,
-        { name: 'AES-CBC' },
+        { name: 'AES-GCM' },
         false,
         ['decrypt']
     );
-    
-    return { key, iv };
 }
