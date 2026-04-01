@@ -9,6 +9,7 @@
     <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <meta name="robots" content="noindex, nofollow">
     <meta name="encrypted-gallery" content="true">
+    <meta name="encrypted-manifest-url" content="{{ gallery.manifest_path }}">
 </head>
 <body class="bg-gray-100">
     <header class="bg-white shadow-md">
@@ -84,6 +85,7 @@
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             new EncryptedGallery('{{ gallery.id }}', {
+                manifestUrl: '{{ gallery.manifest_path }}',
                 limits: {
                     full: 1,
                     thumbnail: 0

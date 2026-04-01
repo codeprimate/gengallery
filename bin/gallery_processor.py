@@ -41,6 +41,13 @@ console = Console()
 with open('config.yaml', 'r') as f:
     config = yaml.safe_load(f)
 
+MANIFEST_FILENAME = 'manifest.json'
+MANIFEST_SCHEMA_VERSION = 1
+MANIFEST_CRYPTO_SUITE = 'pge-v1'
+MANIFEST_KDF = 'hkdf-sha256-v1'
+MANIFEST_SALT_SOURCE = 'gallery_id_utf8'
+MANIFEST_VARIANT_FORMAT_VERSION = 1
+
 def generate_image_id(image_path: str, gallery_id: str) -> str:
     """
     Generate a unique ID for an image based on its path and gallery ID.
@@ -109,6 +116,67 @@ def cleanup_missing_image(gallery_id: str, image_metadata: dict, source_path: st
             
     return True
 
+def get_variant_url(image_metadata: dict, gallery_id: str, variant_name: str) -> str:
+    """Resolve variant URL from image metadata, with deterministic fallback."""
+    variant_path_key = f'{variant_name}_path'
+    if variant_name == 'full':
+        return image_metadata.get('path', '')
+    if variant_path_key in image_metadata:
+        return image_metadata.get(variant_path_key, '')
+
+    image_extension = os.path.splitext(image_metadata.get('path', ''))[1] or '.enc'
+    return f"/galleries/{gallery_id}/{variant_name}/{image_metadata['id']}{image_extension}"
+
+def create_manifest_dict(gallery_data: dict) -> dict:
+    """Create public encrypted manifest schema v1 from gallery metadata."""
+    variant_names = list(config.get('image_sizes', {}).keys())
+    images = []
+    for image in gallery_data.get('images', []):
+        variants = {}
+        for variant_name in variant_names:
+            variant_url = get_variant_url(image, gallery_data['id'], variant_name)
+            if variant_url:
+                variants[variant_name] = {
+                    'url': variant_url,
+                    'format_version': MANIFEST_VARIANT_FORMAT_VERSION
+                }
+
+        image_entry = {
+            'id': image['id'],
+            'variants': variants,
+            'metadata_url': image.get('metadata_path', '')
+        }
+        images.append(image_entry)
+
+    return {
+        'schema_version': MANIFEST_SCHEMA_VERSION,
+        'gallery_id': gallery_data['id'],
+        'encrypted': gallery_data.get('encrypted', False),
+        'crypto': {
+            'suite': MANIFEST_CRYPTO_SUITE,
+            'kdf': MANIFEST_KDF,
+            'salt_source': MANIFEST_SALT_SOURCE
+        },
+        'verifier': {
+            'storage_token_hash_hex': gallery_data.get('storage_token_hash_hex', '')
+        },
+        'images': images
+    }
+
+def write_manifest_file(gallery_data: dict) -> str:
+    """Write encrypted gallery manifest to public_html and return its URL path."""
+    manifest_output_path = os.path.join(
+        config['output_path'],
+        'public_html',
+        'galleries',
+        gallery_data['id'],
+        MANIFEST_FILENAME
+    )
+    os.makedirs(os.path.dirname(manifest_output_path), exist_ok=True)
+    with open(manifest_output_path, 'w') as manifest_file:
+        json.dump(create_manifest_dict(gallery_data), manifest_file, indent=2)
+    return f"/galleries/{gallery_data['id']}/{MANIFEST_FILENAME}"
+
 def process_gallery(gallery_path: str) -> dict:
     """
     Process a single gallery directory and generate its metadata.
@@ -138,6 +206,7 @@ def process_gallery(gallery_path: str) -> dict:
                 "storage_token_label": str,    # Token label/version marker
                 "salt_b64": str,               # Placeholder until v1 KDF is implemented
                 "storage_token_hash_hex": str, # Temporary verifier hash for gate checks
+                "manifest_path": str,         # Public manifest path for encrypted galleries
                 "unlisted": bool,             # Whether gallery is hidden from listings
                 "cover": dict | None          # Cover image metadata or None
             }
@@ -202,11 +271,13 @@ def process_gallery(gallery_path: str) -> dict:
         gallery_data['storage_token_label'] = STORAGE_TOKEN_INFO_PREFIX.rstrip(':')
         gallery_data['salt_b64'] = salt_b64
         gallery_data['storage_token_hash_hex'] = storage_token_hash_hex
+        gallery_data['manifest_path'] = ''
     else:
         gallery_data['requires_login'] = False
         gallery_data['storage_token_label'] = ''
         gallery_data['salt_b64'] = ''
         gallery_data['storage_token_hash_hex'] = ''
+        gallery_data['manifest_path'] = ''
 
     # Handle unlisted galleries - encrypted galleries are always unlisted
     gallery_data['unlisted'] = is_encrypted or gallery_config.get('unlisted', False)
@@ -267,6 +338,9 @@ def process_gallery(gallery_path: str) -> dict:
 
     # Sort images by date taken if available
     gallery_data['images'].sort(key=lambda x: x['exif'].get('DateTimeOriginal', ''), reverse=True)
+
+    if is_encrypted:
+        gallery_data['manifest_path'] = write_manifest_file(gallery_data)
 
     # Determine the latest updated timestamp of any files in the source gallery directory
     latest_timestamp = max(os.path.getmtime(os.path.join(gallery_path, f)) for f in os.listdir(gallery_path) if os.path.isfile(os.path.join(gallery_path, f)))

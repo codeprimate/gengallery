@@ -63,9 +63,11 @@ class GalleryLogin {
      * @param {string} galleryId - Unique identifier for the gallery
      * @param {string} storageTokenHashHex - Hash of the storage token for verification
      */
-    constructor(galleryId, storageTokenHashHex) {
+    constructor(galleryId, storageTokenHashHex, options = {}) {
         this.galleryId = galleryId;
         this.storageTokenHashHex = storageTokenHashHex;
+        this.manifestUrl = options.manifestUrl || '';
+        this.saltB64 = options.saltB64 || '';
         this.loadingState = document.getElementById('loadingState');
         this.loginForm = document.getElementById('loginForm');
         this.passwordInput = document.getElementById('password');
@@ -264,6 +266,7 @@ class EncryptedGallery {
     constructor(galleryId, options = {}) {
         this.galleryId = galleryId;
         this.storageToken = localStorage.getItem(`${STORAGE_TOKEN_PREFIX}${this.galleryId}`);
+        this.manifestUrl = options.manifestUrl || '';
         this.options = {
             placeholderSelector: options.placeholderSelector || '#encrypted-placeholder',
             imageSelector: options.imageSelector || '.encrypted-image',

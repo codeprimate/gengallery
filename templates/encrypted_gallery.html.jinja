@@ -10,6 +10,7 @@
     <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <meta name="robots" content="noindex, nofollow">
     <meta name="encrypted-gallery" content="true">
+    <meta name="encrypted-manifest-url" content="{{ gallery.manifest_path }}">
 </head>
 
 <body class="bg-gray-100">
@@ -170,6 +171,7 @@
         document.addEventListener('DOMContentLoaded', function() {
             // Initialize encryption handler with gallery ID.
             new EncryptedGallery('{{ gallery.id }}', {
+                manifestUrl: '{{ gallery.manifest_path }}',
                 limits: {
                     full: 1,      // Only decrypt one full-size image at a time
                     cover: 3,     // Allow up to 3 cover images to be decrypted
