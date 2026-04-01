@@ -2,6 +2,7 @@
  * Handles gallery login functionality and password verification.
  */
 const STORAGE_TOKEN_PREFIX = 'pge.v1.storage_token.';
+const LEGACY_PRIVATE_ID_PREFIX = 'gallery_';
 const PROTECTED_GALLERY_PAGE = 'gallery.html';
 const STORAGE_TOKEN_INFO_PREFIX = 'pge/v1/storage_token:';
 const IMAGE_KEY_INFO = 'pge/v1/key:image';
@@ -82,6 +83,7 @@ class GalleryLogin {
      * @returns {Promise<void>}
      */
     async init() {
+        this.clearLegacyCredentialKey();
         const hasValidCredentials = await this.checkSavedCredentials();
         if (!hasValidCredentials) {
             this.loadingState.classList.add('hidden');
@@ -131,6 +133,13 @@ class GalleryLogin {
      */
     getSavedStorageToken() {
         return localStorage.getItem(`${STORAGE_TOKEN_PREFIX}${this.galleryId}`);
+    }
+
+    /**
+     * Removes legacy storage keys from pre-v1 login model.
+     */
+    clearLegacyCredentialKey() {
+        localStorage.removeItem(`${LEGACY_PRIVATE_ID_PREFIX}${this.galleryId}_private_id`);
     }
 
     /**
@@ -243,6 +252,7 @@ class GalleryLock {
 
         // Clear all sensitive data from localStorage
         localStorage.removeItem(`${STORAGE_TOKEN_PREFIX}${this.galleryId}`);
+        localStorage.removeItem(`${LEGACY_PRIVATE_ID_PREFIX}${this.galleryId}_private_id`);
 
         // Clear any sensitive data from memory
         // Force garbage collection hints on sensitive data
