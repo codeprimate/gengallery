@@ -2,6 +2,10 @@ site_name: "My Photography Gallery"
 output_path: "./export"
 source_path: "./galleries"
 author: "My Name"
+# Optional: generates export/public_html/.htpasswd for Apache AuthUserFile when both are set.
+# Use server rules to block HTTP access to .htpasswd. Omit both keys to disable.
+# site_username: "gallery"
+# site_password: "change-me"
 image_sizes:
   cover: 1024
   thumbnail: 450

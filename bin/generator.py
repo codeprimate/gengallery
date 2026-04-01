@@ -15,6 +15,12 @@ from rich.panel import Panel
 from rich.text import Text
 from rich.table import Table
 
+from site_htpasswd import (
+    SITE_HTPASSWD_FILENAME,
+    SiteHtpasswdError,
+    write_site_htpasswd_from_config,
+)
+
 console = Console()
 PROTECTED_PAGE_HASH_LENGTH = 16
 PROTECTED_PAGE_EXTENSION = '.html'
@@ -522,6 +528,23 @@ def main():
 
         generate_404_page(config, config['output_path'])
         copy_static_files(config, config['output_path'], quiet=False)
+
+        try:
+            htpasswd_status = write_site_htpasswd_from_config(config, config['output_path'])
+            if htpasswd_status == "written":
+                console.print(
+                    f"[green]✓[/green] Wrote [blue]public_html/{SITE_HTPASSWD_FILENAME}[/blue] "
+                    "for site HTTP Basic auth"
+                )
+        except SiteHtpasswdError as e:
+            any_errors = True
+            errors.append({
+                'stage': 'Site .htpasswd',
+                'type': 'SiteHtpasswdError',
+                'error': str(e)
+            })
+            console.print(f"[red]✗[/red] Site .htpasswd: {e}")
+
         stage_times['finalize'] = datetime.now() - stage_start
         console.print(f"[green]✓[/green] [dim]Completed in {stage_times['finalize'].total_seconds():.1f}s[/dim]")
 
