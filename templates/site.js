@@ -27,6 +27,19 @@ function buildStorageTokenKey(galleryId) {
     return `${STORAGE_TOKEN_PREFIX}${galleryId}`;
 }
 
+function resolveProtectedGalleryPage(candidatePage) {
+    if (typeof candidatePage !== 'string') {
+        return PROTECTED_GALLERY_PAGE;
+    }
+
+    const normalizedPage = candidatePage.trim();
+    if (normalizedPage.length === 0) {
+        return PROTECTED_GALLERY_PAGE;
+    }
+
+    return normalizedPage;
+}
+
 function getLegacyStorageKeysForGallery(galleryId) {
     const keys = [`${LEGACY_PRIVATE_ID_PREFIX}${galleryId}_private_id`];
     for (const prefix of LEGACY_STORAGE_TOKEN_PREFIXES) {
@@ -107,6 +120,7 @@ class GalleryLogin {
         this.storageTokenHashHex = storageTokenHashHex;
         this.manifestUrl = options.manifestUrl || '';
         this.saltB64 = options.saltB64 || '';
+        this.protectedPage = resolveProtectedGalleryPage(options.protectedPage);
         this.loadingState = document.getElementById('loadingState');
         this.loginForm = document.getElementById('loginForm');
         this.passwordInput = document.getElementById('password');
@@ -155,7 +169,7 @@ class GalleryLogin {
      */
     redirectToGallery() {
         const hash = this.getHashFromUrl();
-        window.location.href = `./${PROTECTED_GALLERY_PAGE}${hash}`;
+        window.location.href = `./${this.protectedPage}${hash}`;
     }
 
     /**
@@ -802,6 +816,7 @@ async function deriveEncryptionParams(galleryId, storageToken) {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         buildStorageTokenKey,
+        resolveProtectedGalleryPage,
         getLegacyStorageKeysForGallery,
         clearStorageKeysForGallery
     };

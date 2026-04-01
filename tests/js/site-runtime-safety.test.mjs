@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const {
   buildStorageTokenKey,
+  resolveProtectedGalleryPage,
   getLegacyStorageKeysForGallery,
   clearStorageKeysForGallery
 } = require('../../templates/site.js');
@@ -21,6 +22,13 @@ test('legacy key discovery includes known stale key patterns', () => {
     'storage_token.abc',
     'storage_token_abc'
   ]);
+});
+
+test('protected gallery page resolver falls back safely', () => {
+  assert.equal(resolveProtectedGalleryPage('abc123def4567890.html'), 'abc123def4567890.html');
+  assert.equal(resolveProtectedGalleryPage('  abc123def4567890.html  '), 'abc123def4567890.html');
+  assert.equal(resolveProtectedGalleryPage(''), 'gallery.html');
+  assert.equal(resolveProtectedGalleryPage(undefined), 'gallery.html');
 });
 
 test('logout cleanup removes namespaced token and stale keys', () => {

@@ -69,7 +69,8 @@
         document.addEventListener('DOMContentLoaded', function () {
             new GalleryLogin('{{ gallery.id }}', '{{ gallery.storage_token_hash_hex }}', {
                 manifestUrl: '{{ gallery.manifest_path }}',
-                saltB64: '{{ gallery.salt_b64 }}'
+                saltB64: '{{ gallery.salt_b64 }}',
+                protectedPage: '{{ protected_gallery_page }}'
             });
         });
     </script>

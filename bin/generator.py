@@ -16,6 +16,9 @@ from rich.text import Text
 from rich.table import Table
 
 console = Console()
+PROTECTED_PAGE_HASH_LENGTH = 16
+PROTECTED_PAGE_EXTENSION = '.html'
+LEGACY_PROTECTED_PAGE_FILENAME = 'gallery.html'
 
 def load_config():
     """Load and parse the YAML configuration file.
@@ -168,14 +171,14 @@ def get_gallery_config(gallery):
     
     if is_encrypted:
         return {
-            'output_filename': 'gallery.html',
+            'output_filename': get_protected_gallery_filename(gallery),
             'needs_login': True,
             'gallery_template': 'encrypted_gallery',
             'image_template': 'encrypted_image'
         }
     elif requires_login:
         return {
-            'output_filename': 'gallery.html',
+            'output_filename': get_protected_gallery_filename(gallery),
             'needs_login': True,
             'gallery_template': 'gallery',
             'image_template': 'image'
@@ -187,6 +190,27 @@ def get_gallery_config(gallery):
             'gallery_template': 'gallery',
             'image_template': 'image'
         }
+
+def get_protected_gallery_filename(gallery):
+    """Build deterministic obfuscated page filename for protected galleries.
+
+    Args:
+        gallery (dict): Gallery metadata containing storage token verifier hash.
+
+    Returns:
+        str: Obfuscated gallery page filename.
+
+    Raises:
+        ValueError: If storage token hash is missing or too short.
+    """
+    verifier_hash = gallery.get('storage_token_hash_hex')
+    if not verifier_hash or len(verifier_hash) < PROTECTED_PAGE_HASH_LENGTH:
+        raise ValueError(
+            f"Protected gallery '{gallery.get('id', 'unknown')}' is missing a valid storage_token_hash_hex"
+        )
+
+    protected_page_id = verifier_hash[:PROTECTED_PAGE_HASH_LENGTH]
+    return f'{protected_page_id}{PROTECTED_PAGE_EXTENSION}'
 
 def generate_login_page(templates, context, gallery_dir):
     """Generate login page for protected galleries.
@@ -217,6 +241,20 @@ def generate_gallery_index(templates, template_key, context, gallery_dir, output
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, 'w') as f:
         f.write(gallery_html)
+
+def remove_legacy_protected_gallery_page(gallery_dir, output_filename):
+    """Remove stale legacy protected page so direct legacy URL cannot be used.
+
+    Args:
+        gallery_dir (str): Gallery output directory path.
+        output_filename (str): Current protected gallery filename.
+    """
+    if output_filename == LEGACY_PROTECTED_PAGE_FILENAME:
+        return
+
+    legacy_page_path = os.path.join(gallery_dir, LEGACY_PROTECTED_PAGE_FILENAME)
+    if os.path.exists(legacy_page_path):
+        os.remove(legacy_page_path)
 
 def generate_image_pages(templates, template_key, gallery, output_path, context):
     """Generate individual image pages for a gallery.
@@ -289,7 +327,8 @@ def generate_gallery_pages(config, galleries_data, output_path, progress=None, t
             'site_name': config['site_name'],
             'author': config['author'],
             'gallery': gallery,
-            'current_year': datetime.now().year
+            'current_year': datetime.now().year,
+            'protected_gallery_page': gallery_config['output_filename']
         }
 
         # Create gallery directory
@@ -309,6 +348,8 @@ def generate_gallery_pages(config, galleries_data, output_path, progress=None, t
             gallery_dir,
             gallery_config['output_filename']
         )
+        if gallery_config['needs_login']:
+            remove_legacy_protected_gallery_page(gallery_dir, gallery_config['output_filename'])
         console.print(f"  [green]✓[/green] Index page: [blue]galleries/{gallery['id']}/{gallery_config['output_filename']}[/blue]")
 
         # Generate image pages
