@@ -10,7 +10,7 @@ Key Features:
     - Multi-format image processing (JPEG, PNG, TIFF, etc.)
     - EXIF metadata extraction and formatting
     - Automatic thumbnail and web-optimized image generation
-    - Optional AES-CBC encryption for private galleries
+    - Optional envelope-v1 AES-256-GCM encryption for encrypted galleries
     - Deterministic ID generation for images and galleries
     - EXIF-based image rotation handling
     - Rich progress tracking and console output
@@ -57,8 +57,6 @@ import yaml
 from fractions import Fraction
 import hashlib
 import warnings
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives import padding
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, TimeRemainingColumn
 from rich.panel import Panel
@@ -66,6 +64,7 @@ from rich.text import Text
 import sys
 from pillow_heif import register_heif_opener
 from crypto_v1 import derive_storage_token_bytes, derive_image_key_bytes
+from envelope_v1 import encrypt_payload, decrypt_payload
 
 # Suppress specific warnings
 warnings.filterwarnings("ignore", category=Image.DecompressionBombWarning)
@@ -252,9 +251,9 @@ def get_lat_lon(img: exif.Image) -> tuple[float | None, float | None]:
 
     return None, None
 
-def derive_encryption_params(gallery_id: str, image_id: str, password: str, source_file: str = None) -> tuple[bytes, bytes]:
+def derive_encryption_params(gallery_id: str, image_id: str, password: str, source_file: str = None) -> bytes:
     """
-    Derive deterministic encryption key and initialization vector.
+    Derive deterministic encryption key for gallery image payloads.
 
     Args:
         gallery_id: Unique identifier for the gallery
@@ -263,43 +262,24 @@ def derive_encryption_params(gallery_id: str, image_id: str, password: str, sour
         source_file: Optional source file path for additional entropy
 
     Returns:
-        tuple: (key, iv) where:
-            - key (bytes): 32-byte AES encryption key
-            - iv (bytes): 16-byte initialization vector
+        bytes: 32-byte AES-GCM image key
 
     Note:
-        The key derivation process ensures the same key/IV pair will be
-        generated for the same input parameters, allowing for deterministic
-        encryption/decryption across different sessions.
+        The key derivation process ensures deterministic key generation
+        across build/runtime implementations.
     """
     storage_token_bytes = derive_storage_token_bytes(password, gallery_id)
     key = derive_image_key_bytes(storage_token_bytes, gallery_id)
     
-    # Generate IV from image ID
-    iv = hashlib.sha256(image_id.encode()).digest()[:16]
-    
-    return key, iv
+    return key
 
-def encrypt_file(file_path: str, key: bytes, iv: bytes) -> bytes:
+def encrypt_file(file_path: str, key: bytes) -> bytes:
     """
-    Encrypt a file using AES-CBC with the provided key and IV.
+    Encrypt file contents using envelope-v1 AES-256-GCM.
     """
-    # Create cipher
-    cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
-    
-    # Read and pad the file data
     with open(file_path, 'rb') as f:
         data = f.read()
-    
-    padder = padding.PKCS7(128).padder()
-    padded_data = padder.update(data) + padder.finalize()
-    
-    # Encrypt the data
-    encryptor = cipher.encryptor()
-    encrypted_data = encryptor.update(padded_data) + encryptor.finalize()
-    
-    # Return encrypted data only - IV is derived deterministically on client
-    return encrypted_data
+    return encrypt_payload(data, key)
 
 def get_variant_extension(is_encrypted: bool) -> str:
     """Return expected variant file extension for the gallery mode."""
@@ -381,7 +361,7 @@ def check_output_files(image_path: str, gallery_id: str, image_id: str, is_encry
     
     return True
 
-def verify_encryption(encrypted_path: str, original_path: str, password: str) -> bool:
+def verify_encryption(encrypted_path: str, original_path: str, password: str, gallery_id: str = None) -> bool:
     """
     Verify that an encrypted file can be decrypted back to the original.
 
@@ -404,19 +384,11 @@ def verify_encryption(encrypted_path: str, original_path: str, password: str) ->
     with open(encrypted_path, 'rb') as f:
         encrypted_data = f.read()
     
-    # Extract IV and encrypted data
-    iv = encrypted_data[:16]
-    data = encrypted_data[16:]
-    
-    # Create key and decrypt
-    key_bytes = hashlib.sha256(password.encode()).digest()
-    
-    # Perform decryption and verification
-    cipher = Cipher(algorithms.AES(key_bytes), modes.CBC(iv))
-    decryptor = cipher.decryptor()
-    decrypted_padded = decryptor.update(data) + decryptor.finalize()
-    unpadder = padding.PKCS7(128).unpadder()
-    decrypted_data = unpadder.update(decrypted_padded) + unpadder.finalize()
+    if not gallery_id:
+        raise ValueError('gallery_id is required for v1 verification')
+    storage_token_bytes = derive_storage_token_bytes(password, gallery_id)
+    key_bytes = derive_image_key_bytes(storage_token_bytes, gallery_id)
+    decrypted_data = decrypt_payload(encrypted_data, key_bytes)
     decrypted_hash = hashlib.md5(decrypted_data).hexdigest()
     
     if original_hash != decrypted_hash:
@@ -497,8 +469,8 @@ def process_image_variants(img: Image.Image, image_id: str, gallery_id: str,
                 img_copy.save(temp_path, "JPEG", quality=config['jpg_quality'])
                 
                 # Encrypt the file
-                key, iv = derive_encryption_params(gallery_id, image_id, gallery_config['password'])
-                encrypted_data = encrypt_file(temp_path, key, iv)
+                key = derive_encryption_params(gallery_id, image_id, gallery_config['password'])
+                encrypted_data = encrypt_file(temp_path, key)
                 
                 # Write encrypted data
                 with open(output_path, 'wb') as f:
