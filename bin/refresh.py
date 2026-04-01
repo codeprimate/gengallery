@@ -12,6 +12,7 @@ Coordinates the complete gallery processing pipeline by running:
 import sys
 import time
 from image_processor import main as process_images
+from video_processor import main as process_videos
 from gallery_processor import main as process_galleries
 from generator import main as generate_site
 from rich.console import Console
@@ -41,6 +42,11 @@ def main():
         process_images()
         img_duration = time.time() - img_start
         console.print(f"[green]✓ Image processing completed in {img_duration:.2f}s[/]")
+
+        vid_start = time.time()
+        process_videos()
+        vid_duration = time.time() - vid_start
+        console.print(f"[green]✓ Video processing completed in {vid_duration:.2f}s[/]")
         
         # Gallery Processing
         gallery_start = time.time()

@@ -480,6 +480,240 @@ class ObjectUrlCache {
     }
 }
 
+const ENCRYPTED_VIDEO_PLAYBACK_CACHE_MAX_ENTRIES = 1;
+const VIDEO_DECRYPT_MAX_CONCURRENT = 1;
+const VIDEO_PLAYBACK_MIME = 'video/mp4';
+
+/**
+ * Decrypt envelope v1 payload to a Blob with the given MIME type.
+ */
+async function decryptEnvelopeToBlob(galleryId, storageToken, encryptedArrayBuffer, mimeType) {
+    const envelope = EnvelopeV1.parse(encryptedArrayBuffer);
+    const key = await deriveEncryptionParams(galleryId, storageToken);
+    const decrypted = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: envelope.nonce },
+        key,
+        envelope.ciphertextWithTag
+    );
+    return new Blob([decrypted], { type: mimeType });
+}
+
+/**
+ * Fetch URL and decrypt through a DecryptQueue.
+ */
+async function fetchDecryptBlobInQueue(queue, galleryId, storageToken, url, mimeType) {
+    return queue.enqueue(async () => {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('ERR_MANIFEST_INVALID');
+        if (!storageToken) {
+            throw new Error('ERR_BAD_PASSWORD_OR_TOKEN');
+        }
+        const encryptedData = await response.arrayBuffer();
+        try {
+            return await decryptEnvelopeToBlob(galleryId, storageToken, encryptedData, mimeType);
+        } catch (error) {
+            throw new Error('ERR_DECRYPT_AUTH_FAILED');
+        }
+    });
+}
+
+/**
+ * Encrypted video detail page: poster from decrypted thumb, playback decrypt on first play.
+ */
+class EncryptedVideoPage {
+    /**
+     * @param {string} galleryId
+     * @param {Object} options
+     */
+    constructor(galleryId, options = {}) {
+        this.galleryId = galleryId;
+        this.storageToken = localStorage.getItem(buildStorageTokenKey(galleryId));
+        this.video = document.querySelector(options.videoSelector || '#encryptedVideo');
+        this.overlay = document.querySelector(options.overlaySelector || '#encryptedVideoOverlay');
+        this.manifestUrl = options.manifestUrl || '';
+        this.playbackCache = new ObjectUrlCache(ENCRYPTED_VIDEO_PLAYBACK_CACHE_MAX_ENTRIES);
+        this.videoDecryptQueue = new DecryptQueue(VIDEO_DECRYPT_MAX_CONCURRENT);
+        this.metadataCache = new Map();
+        this.metadataKeyPromise = null;
+        this._playbackLoaded = false;
+        this._posterObjectUrl = null;
+        this.errorLogCount = 0;
+        this.maxErrorLogs = 5;
+        this._cleanedUp = false;
+        this.init();
+        window.addEventListener('pagehide', () => this.cleanup());
+        window.addEventListener('unload', () => this.cleanup());
+    }
+
+    async init() {
+        if (!this.video || !this.storageToken) {
+            return;
+        }
+        try {
+            if (this.overlay) this.overlay.style.display = 'flex';
+            const thumbUrl = this.video.dataset.encryptedThumbnailUrl;
+            if (thumbUrl) {
+                const thumbBlob = await fetchDecryptBlobInQueue(
+                    this.videoDecryptQueue,
+                    this.galleryId,
+                    this.storageToken,
+                    thumbUrl,
+                    'image/jpeg'
+                );
+                this._posterObjectUrl = URL.createObjectURL(thumbBlob);
+                this.video.poster = this._posterObjectUrl;
+            }
+            await this.hydrateMetadata();
+            if (this.overlay) this.overlay.style.display = 'none';
+        } catch (error) {
+            this.logError('ERR_VIDEO_POSTER_DECRYPT', { galleryId: this.galleryId });
+            if (this.overlay) {
+                this.overlay.style.display = 'flex';
+                this.overlay.innerHTML = '<div class="text-red-600">Decryption failed</div>';
+            }
+        }
+
+        this.video.addEventListener('play', (e) => this.onPlay(e));
+    }
+
+    async onPlay(e) {
+        if (this._playbackLoaded) {
+            return;
+        }
+        e.preventDefault();
+        this.video.pause();
+        const playUrl = this.video.dataset.encryptedPlaybackUrl;
+        if (!playUrl) return;
+        if (this.overlay) this.overlay.style.display = 'flex';
+        try {
+            const blob = await fetchDecryptBlobInQueue(
+                this.videoDecryptQueue,
+                this.galleryId,
+                this.storageToken,
+                playUrl,
+                VIDEO_PLAYBACK_MIME
+            );
+            const objectUrl = this.playbackCache.set(playUrl, blob);
+            this.video.src = objectUrl;
+            this._playbackLoaded = true;
+            if (this.overlay) this.overlay.style.display = 'none';
+            await this.video.play();
+        } catch (error) {
+            this.logError('ERR_VIDEO_PLAYBACK_DECRYPT', { galleryId: this.galleryId, assetUrl: playUrl });
+            if (this.overlay) {
+                this.overlay.style.display = 'flex';
+                this.overlay.innerHTML = '<div class="text-red-600">Decryption failed</div>';
+            }
+        }
+    }
+
+    async getMetadataKey() {
+        if (!this.storageToken) {
+            throw new Error('ERR_BAD_PASSWORD_OR_TOKEN');
+        }
+        if (!this.metadataKeyPromise) {
+            this.metadataKeyPromise = (async () => {
+                const storageTokenBytes = base64urlToBytes(this.storageToken);
+                const metadataKeyBytes = await deriveMetadataKeyBytes(storageTokenBytes, this.galleryId);
+                return crypto.subtle.importKey(
+                    'raw',
+                    metadataKeyBytes,
+                    { name: 'AES-GCM' },
+                    false,
+                    ['decrypt']
+                );
+            })();
+        }
+        return this.metadataKeyPromise;
+    }
+
+    async fetchAndDecryptMetadata(metadataUrl) {
+        if (!metadataUrl) return null;
+        if (this.metadataCache.has(metadataUrl)) {
+            return this.metadataCache.get(metadataUrl);
+        }
+        const response = await fetch(metadataUrl);
+        if (!response.ok) throw new Error('ERR_MANIFEST_INVALID');
+        const encryptedData = await response.arrayBuffer();
+        const envelope = EnvelopeV1.parse(encryptedData);
+        const metadataKey = await this.getMetadataKey();
+        let decrypted;
+        try {
+            decrypted = await crypto.subtle.decrypt(
+                { name: 'AES-GCM', iv: envelope.nonce },
+                metadataKey,
+                envelope.ciphertextWithTag
+            );
+        } catch (error) {
+            throw new Error('ERR_DECRYPT_AUTH_FAILED');
+        }
+        const metadata = JSON.parse(new TextDecoder().decode(decrypted));
+        this.metadataCache.set(metadataUrl, metadata);
+        return metadata;
+    }
+
+    resolveMetadataField(metadata, fieldName) {
+        if (!metadata || !fieldName) return '';
+        if (fieldName === 'DateTimeOriginal') {
+            return metadata.exif && metadata.exif.DateTimeOriginal ? metadata.exif.DateTimeOriginal : '';
+        }
+        const value = metadata[fieldName];
+        return typeof value === 'string' ? value : '';
+    }
+
+    applyMetadataToScope(scope, metadata) {
+        const fields = scope.querySelectorAll('.encrypted-meta-field');
+        for (const fieldElement of fields) {
+            const fieldName = fieldElement.dataset.field || '';
+            const fallback = fieldElement.dataset.fallback || '';
+            const value = this.resolveMetadataField(metadata, fieldName);
+            fieldElement.textContent = value || fallback;
+        }
+    }
+
+    async hydrateMetadata() {
+        const metadataUrl = this.video.dataset.encryptedMetadataUrl;
+        if (!metadataUrl) return;
+        try {
+            const metadata = await this.fetchAndDecryptMetadata(metadataUrl);
+            const scopes = document.querySelectorAll('[data-encrypted-metadata-url]');
+            for (const scope of scopes) {
+                if (scope.getAttribute('data-encrypted-metadata-url') === metadataUrl) {
+                    this.applyMetadataToScope(scope, metadata);
+                }
+            }
+            if (metadata && metadata.filename && document.title.startsWith('Private Video')) {
+                document.title = `${metadata.filename} - Private Gallery`;
+            }
+        } catch (error) {
+            this.logError('ERR_VIDEO_METADATA_DECRYPT', { galleryId: this.galleryId, assetUrl: metadataUrl });
+        }
+    }
+
+    cleanup() {
+        if (this._cleanedUp) return;
+        this._cleanedUp = true;
+        if (this._posterObjectUrl) {
+            URL.revokeObjectURL(this._posterObjectUrl);
+            this._posterObjectUrl = null;
+        }
+        this.playbackCache.revokeAll();
+        this.metadataCache.clear();
+        this.metadataKeyPromise = null;
+        this.storageToken = null;
+    }
+
+    logError(category, details = {}) {
+        if (this.errorLogCount < this.maxErrorLogs) {
+            logSafeDiagnostic(category, details);
+            this.errorLogCount += 1;
+            if (this.errorLogCount === this.maxErrorLogs) {
+                console.warn(DIAGNOSTIC_SUPPRESSION_NOTICE, { category });
+            }
+        }
+    }
+}
+
 /**
  * Handles encrypted image loading and decryption in galleries.
  */
@@ -704,29 +938,13 @@ class EncryptedGallery {
      * Fetches and decrypts an encrypted image.
      */
     async fetchAndDecrypt(url) {
-        return this.decryptQueue.enqueue(async () => {
-            const response = await fetch(url);
-            if (!response.ok) throw new Error('ERR_MANIFEST_INVALID');
-
-            if (!this.storageToken) {
-                throw new Error('ERR_BAD_PASSWORD_OR_TOKEN');
-            }
-
-            const encryptedData = await response.arrayBuffer();
-            const envelope = EnvelopeV1.parse(encryptedData);
-            const key = await deriveEncryptionParams(this.galleryId, this.storageToken);
-
-            try {
-                const decrypted = await crypto.subtle.decrypt(
-                    { name: 'AES-GCM', iv: envelope.nonce },
-                    key,
-                    envelope.ciphertextWithTag
-                );
-                return new Blob([decrypted], { type: 'image/jpeg' });
-            } catch (error) {
-                throw new Error('ERR_DECRYPT_AUTH_FAILED');
-            }
-        });
+        return fetchDecryptBlobInQueue(
+            this.decryptQueue,
+            this.galleryId,
+            this.storageToken,
+            url,
+            'image/jpeg'
+        );
     }
 
     async getMetadataKey() {

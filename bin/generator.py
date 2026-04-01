@@ -27,6 +27,29 @@ PROTECTED_PAGE_EXTENSION = '.html'
 LEGACY_PROTECTED_PAGE_FILENAME = 'gallery.html'
 LISTING_FEATURED_TAG = 'featured'
 
+
+def _gallery_media_sort_key(item: dict) -> tuple:
+    exif = item.get('exif') or {}
+    dt = exif.get('DateTimeOriginal') or ''
+    return (dt, item.get('id', ''))
+
+
+def build_gallery_media_timeline(gallery: dict) -> list:
+    """Images and videos in one list, reverse chronological by EXIF date (gallery_processor sort)."""
+    merged = list(gallery.get('images') or []) + list(gallery.get('videos') or [])
+    merged.sort(key=_gallery_media_sort_key, reverse=True)
+    return merged
+
+
+def neighbors_in_timeline(timeline: list, item_id: str) -> tuple:
+    """Return (previous_item, next_item) for prev/next arrows across images and videos."""
+    for i, item in enumerate(timeline):
+        if item.get('id') == item_id:
+            prev_item = timeline[i - 1] if i > 0 else None
+            next_item = timeline[i + 1] if i < len(timeline) - 1 else None
+            return prev_item, next_item
+    return None, None
+
 def load_config():
     """Load and parse the YAML configuration file.
 
@@ -169,7 +192,9 @@ def get_gallery_templates(env):
         'gallery': env.get_template('gallery.html.jinja'),
         'encrypted_gallery': env.get_template('encrypted_gallery.html.jinja'),
         'image': env.get_template('image.html.jinja'),
-        'encrypted_image': env.get_template('encrypted_image.html.jinja')
+        'encrypted_image': env.get_template('encrypted_image.html.jinja'),
+        'video': env.get_template('video.html.jinja'),
+        'encrypted_video': env.get_template('encrypted_video.html.jinja'),
     }
 
 def get_gallery_config(gallery):
@@ -189,21 +214,24 @@ def get_gallery_config(gallery):
             'output_filename': get_protected_gallery_filename(gallery),
             'needs_login': True,
             'gallery_template': 'encrypted_gallery',
-            'image_template': 'encrypted_image'
+            'image_template': 'encrypted_image',
+            'video_template': 'encrypted_video',
         }
     elif requires_login:
         return {
             'output_filename': get_protected_gallery_filename(gallery),
             'needs_login': True,
             'gallery_template': 'gallery',
-            'image_template': 'image'
+            'image_template': 'image',
+            'video_template': 'video',
         }
     else:
         return {
             'output_filename': 'index.html',
             'needs_login': False,
             'gallery_template': 'gallery',
-            'image_template': 'image'
+            'image_template': 'image',
+            'video_template': 'video',
         }
 
 def get_protected_gallery_filename(gallery):
@@ -281,15 +309,15 @@ def generate_image_pages(templates, template_key, gallery, output_path, context)
         output_path (str): Base output path
         context (dict): Base template context
     """
-    for i, image in enumerate(gallery['images']):
-        prev_image = gallery['images'][i-1] if i > 0 else None
-        next_image = gallery['images'][i+1] if i < len(gallery['images'])-1 else None
+    timeline = build_gallery_media_timeline(gallery)
+    for image in gallery['images']:
+        nav_prev, nav_next = neighbors_in_timeline(timeline, image['id'])
 
         image_context = {
             **context,
             'image': image,
-            'prev_image': prev_image,
-            'next_image': next_image
+            'nav_prev': nav_prev,
+            'nav_next': nav_next,
         }
 
         rendered_html = templates[template_key].render(image_context)
@@ -302,6 +330,30 @@ def generate_image_pages(templates, template_key, gallery, output_path, context)
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
         with open(output_file, 'w') as f:
             f.write(rendered_html)
+
+
+def generate_video_pages(templates, template_key, gallery, output_path, context):
+    """Generate individual video detail pages for a gallery."""
+    videos = gallery.get('videos') or []
+    timeline = build_gallery_media_timeline(gallery)
+    for video in videos:
+        nav_prev, nav_next = neighbors_in_timeline(timeline, video['id'])
+        video_context = {
+            **context,
+            'video': video,
+            'nav_prev': nav_prev,
+            'nav_next': nav_next,
+        }
+        rendered_html = templates[template_key].render(video_context)
+        output_file = os.path.join(
+            output_path,
+            'public_html',
+            f"galleries/{gallery['id']}/{video['id']}.html",
+        )
+        os.makedirs(os.path.dirname(output_file), exist_ok=True)
+        with open(output_file, 'w') as f:
+            f.write(rendered_html)
+
 
 def generate_gallery_pages(config, galleries_data, output_path, progress=None, task=None):
     """Generate individual gallery and image pages.
@@ -319,8 +371,15 @@ def generate_gallery_pages(config, galleries_data, output_path, progress=None, t
     templates = get_gallery_templates(env)
 
     for gallery in galleries_data['galleries']:
+        num_videos = len(gallery.get('videos') or [])
         if progress:
-            progress.update(task, description=f"[yellow]Gallery: [cyan]{gallery['title']}[/cyan] ({len(gallery['images'])} images)")
+            progress.update(
+                task,
+                description=(
+                    f"[yellow]Gallery: [cyan]{gallery['title']}[/cyan] "
+                    f"({len(gallery['images'])} images, {num_videos} videos)"
+                ),
+            )
         else:
             # Build status icons
             status_icons = []
@@ -334,7 +393,10 @@ def generate_gallery_pages(config, galleries_data, output_path, progress=None, t
                 status_icons.append("[red]🔒[/]")
             status_str = " ".join(status_icons)
             
-            console.print(f"[yellow]→[/yellow] [blue]{gallery['title']}[/blue] {status_str} ({len(gallery['images'])} images)")
+            console.print(
+                f"[yellow]→[/yellow] [blue]{gallery['title']}[/blue] {status_str} "
+                f"({len(gallery['images'])} images, {num_videos} videos)"
+            )
 
         # Set up gallery configuration and context
         gallery_config = get_gallery_config(gallery)
@@ -343,7 +405,8 @@ def generate_gallery_pages(config, galleries_data, output_path, progress=None, t
             'author': config['author'],
             'gallery': gallery,
             'current_year': datetime.now().year,
-            'protected_gallery_page': gallery_config['output_filename']
+            'protected_gallery_page': gallery_config['output_filename'],
+            'media_timeline': build_gallery_media_timeline(gallery),
         }
 
         # Create gallery directory
@@ -376,6 +439,16 @@ def generate_gallery_pages(config, galleries_data, output_path, progress=None, t
             context
         )
         console.print(f"  [green]✓ {len(gallery['images'])}[/green] image pages")
+
+        if num_videos > 0:
+            generate_video_pages(
+                templates,
+                gallery_config['video_template'],
+                gallery,
+                output_path,
+                context,
+            )
+            console.print(f"  [green]✓ {num_videos}[/green] video pages")
 
         if progress and task:
             progress.advance(task)

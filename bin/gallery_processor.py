@@ -42,7 +42,7 @@ with open('config.yaml', 'r') as f:
     config = yaml.safe_load(f)
 
 MANIFEST_FILENAME = 'manifest.json'
-MANIFEST_SCHEMA_VERSION = 1
+MANIFEST_SCHEMA_VERSION = 2
 MANIFEST_CRYPTO_SUITE = 'pge-v1'
 MANIFEST_KDF = 'hkdf-sha256-v1'
 MANIFEST_SALT_SOURCE = 'gallery_id_utf8'
@@ -81,6 +81,53 @@ def generate_image_id(image_path: str, gallery_id: str) -> str:
     """
     unique_string = f"{gallery_id}:{image_path}"
     return hashlib.md5(unique_string.encode()).hexdigest()[:12]
+
+def cleanup_missing_video(gallery_id: str, video_metadata: dict, source_path: str) -> bool:
+    """Remove outputs when source video in the gallery root is missing."""
+    filename = video_metadata.get('filename', '')
+    if not filename:
+        return False
+    video_src = os.path.join(source_path, filename)
+    if os.path.exists(video_src):
+        return False
+
+    item_id = video_metadata['id']
+    metadata_path = os.path.join(config['output_path'], 'metadata', gallery_id, f"{item_id}.json")
+    if os.path.exists(metadata_path):
+        os.remove(metadata_path)
+        console.print(f"  [yellow]→[/] Removed video metadata: [blue]{metadata_path}[/]")
+
+    for ext in ('.jpg', '.enc'):
+        thumb_path = os.path.join(
+            config['output_path'], 'public_html', 'galleries',
+            gallery_id, 'thumbnail', f"{item_id}{ext}"
+        )
+        if os.path.exists(thumb_path):
+            os.remove(thumb_path)
+            console.print(f"  [yellow]→[/] Removed video thumbnail: [blue]{thumb_path}[/]")
+
+    for ext in ('.mp4', '.enc'):
+        play_path = os.path.join(
+            config['output_path'], 'public_html', 'galleries',
+            gallery_id, 'video', f"{item_id}{ext}"
+        )
+        if os.path.exists(play_path):
+            os.remove(play_path)
+            console.print(f"  [yellow]→[/] Removed video playback: [blue]{play_path}[/]")
+
+    metadata_blob_relpath = video_metadata.get('metadata_path', '')
+    if metadata_blob_relpath:
+        metadata_blob_path = os.path.join(
+            config['output_path'],
+            'public_html',
+            metadata_blob_relpath.lstrip('/')
+        )
+        if os.path.exists(metadata_blob_path):
+            os.remove(metadata_blob_path)
+            console.print(f"  [yellow]→[/] Removed metadata blob: [blue]{metadata_blob_path}[/]")
+
+    return True
+
 
 def cleanup_missing_image(gallery_id: str, image_metadata: dict, source_path: str) -> bool:
     """
@@ -137,6 +184,14 @@ def cleanup_missing_image(gallery_id: str, image_metadata: dict, source_path: st
             
     return True
 
+
+def cleanup_missing_item(gallery_id: str, item_metadata: dict, source_path: str) -> bool:
+    """Dispatch cleanup for image or video by media_type."""
+    media_type = item_metadata.get('media_type') or 'image'
+    if media_type == 'video':
+        return cleanup_missing_video(gallery_id, item_metadata, source_path)
+    return cleanup_missing_image(gallery_id, item_metadata, source_path)
+
 def get_variant_url(image_metadata: dict, gallery_id: str, variant_name: str) -> str:
     """Resolve variant URL from image metadata, with deterministic fallback."""
     variant_path_key = f'{variant_name}_path'
@@ -149,7 +204,7 @@ def get_variant_url(image_metadata: dict, gallery_id: str, variant_name: str) ->
     return f"/galleries/{gallery_id}/{variant_name}/{image_metadata['id']}{image_extension}"
 
 def create_manifest_dict(gallery_data: dict) -> dict:
-    """Create public encrypted manifest schema v1 from gallery metadata."""
+    """Create public encrypted manifest (schema v2) from gallery metadata."""
     variant_names = list(config.get('image_sizes', {}).keys())
     images = []
     for image in gallery_data.get('images', []):
@@ -169,6 +224,27 @@ def create_manifest_dict(gallery_data: dict) -> dict:
         }
         images.append(image_entry)
 
+    videos = []
+    for video in gallery_data.get('videos', []):
+        thumb = video.get('thumbnail_path', '')
+        play = video.get('playback_path', '')
+        variants_v = {}
+        if thumb:
+            variants_v['thumbnail'] = {
+                'url': thumb,
+                'format_version': MANIFEST_VARIANT_FORMAT_VERSION
+            }
+        if play:
+            variants_v['playback'] = {
+                'url': play,
+                'format_version': MANIFEST_VARIANT_FORMAT_VERSION
+            }
+        videos.append({
+            'id': video['id'],
+            'variants': variants_v,
+            'metadata_url': video.get('metadata_path', '')
+        })
+
     return {
         'schema_version': MANIFEST_SCHEMA_VERSION,
         'gallery_id': gallery_data['id'],
@@ -181,7 +257,8 @@ def create_manifest_dict(gallery_data: dict) -> dict:
         'verifier': {
             'storage_token_hash_hex': gallery_data.get('storage_token_hash_hex', '')
         },
-        'images': images
+        'images': images,
+        'videos': videos
     }
 
 def write_manifest_file(gallery_data: dict) -> str:
@@ -279,7 +356,8 @@ def process_gallery(gallery_path: str) -> dict:
         "description": gallery_config.get('description', ''),
         "tags": gallery_config.get('tags', []),
         "content": gallery_config.get('content', ''),
-        "images": []
+        "images": [],
+        "videos": []
     }
 
     # Process Security data
@@ -312,13 +390,15 @@ def process_gallery(gallery_path: str) -> dict:
     for metadata_file in image_files:
         metadata_path = os.path.join(metadata_dir, metadata_file)
         with open(metadata_path, 'r') as f:
-            image_metadata = json.load(f)
-        
+            item_metadata = json.load(f)
+
         # Track if any cleanup occurred
-        if cleanup_missing_image(gallery_id, image_metadata, gallery_path):
+        if cleanup_missing_item(gallery_id, item_metadata, gallery_path):
             cleanup_occurred = True
+        elif item_metadata.get('media_type') == 'video':
+            gallery_data['videos'].append(item_metadata)
         else:
-            gallery_data['images'].append(image_metadata)
+            gallery_data['images'].append(item_metadata)
 
     # Update last_updated if files were removed
     if cleanup_occurred:
@@ -372,15 +452,47 @@ def process_gallery(gallery_path: str) -> dict:
                 "thumbnail_path": first_image['thumbnail_path'],
             }
 
-    # Sort images by date taken if available
+    # Video-only cover: use first video thumbnail for hero (path + thumbnail_path)
+    if not gallery_data['cover'] and gallery_data['videos']:
+        first_video = gallery_data['videos'][0]
+        thumb = first_video['thumbnail_path']
+        if is_encrypted:
+            gallery_data['cover'] = {
+                "id": first_video['id'],
+                "path": thumb,
+                "thumbnail_path": thumb,
+            }
+        else:
+            gallery_data['cover'] = {
+                "id": first_video['id'],
+                "filename": first_video.get('filename', ''),
+                "title": first_video.get('title', ''),
+                "caption": first_video.get('caption', ''),
+                "path": thumb,
+                "thumbnail_path": thumb,
+            }
+
+    # Sort images and videos by date taken if available
     gallery_data['images'].sort(key=lambda x: x.get('exif', {}).get('DateTimeOriginal', ''), reverse=True)
+    gallery_data['videos'].sort(key=lambda x: x.get('exif', {}).get('DateTimeOriginal', ''), reverse=True)
 
     if is_encrypted:
         gallery_data['manifest_path'] = write_manifest_file(gallery_data)
 
-    # Determine the latest updated timestamp of any files in the source gallery directory
-    latest_timestamp = max(os.path.getmtime(os.path.join(gallery_path, f)) for f in os.listdir(gallery_path) if os.path.isfile(os.path.join(gallery_path, f)))
-    gallery_data['last_updated'] = datetime.fromtimestamp(latest_timestamp).strftime('%Y:%m:%d %H:%M:%S')
+    # Latest mtime of any file under the gallery source tree
+    latest_ts = 0.0
+    for root, _, files in os.walk(gallery_path):
+        for fn in files:
+            fp = os.path.join(root, fn)
+            if not os.path.isfile(fp):
+                continue
+            try:
+                latest_ts = max(latest_ts, os.path.getmtime(fp))
+            except OSError:
+                pass
+    if latest_ts <= 0:
+        latest_ts = datetime.now().timestamp()
+    gallery_data['last_updated'] = datetime.fromtimestamp(latest_ts).strftime('%Y:%m:%d %H:%M:%S')
 
     # Save individual gallery metadata
     gallery_json_output_path = os.path.join(
@@ -419,17 +531,17 @@ def main():
         try:
             image_files = sorted(
                 f for f in os.listdir(metadata_dir)
-                if f.endswith('.json')
+                if f.endswith('.json') and f != 'index.json'
             )
         except FileNotFoundError:
             image_files = []
-        num_images = len(image_files)
-        if num_images > 0:
+        num_items = len(image_files)
+        if num_items > 0:
             gallery_info.append((gallery, image_files))
-            total_images += num_images
-            console.print(f"  • [blue]{gallery}[/] → found [green]{num_images} images[/]")
+            total_images += num_items
+            console.print(f"  • [blue]{gallery}[/] → found [green]{num_items}[/] metadata file(s)")
         else:
-            console.print(f"  • [blue]{gallery}[/] → [yellow]no images[/]")
+            console.print(f"  • [blue]{gallery}[/] → [yellow]no gallery items[/]")
 
     console.print("[bold green]✓[/] Found [bold]{} galleries[/] with [bold]{} total images[/]".format(
         len(galleries), total_images

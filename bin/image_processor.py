@@ -110,6 +110,9 @@ STALE_ENCRYPTED_EXTENSIONS = (
     '.bmp',
     '.tif',
     '.tiff',
+    '.mp4',
+    '.mov',
+    '.m4v',
     '.temp',
     '.bin',
     '.encrypted'
@@ -301,7 +304,7 @@ def clean_encrypted_variant_outputs(gallery_id: str) -> None:
         'galleries',
         gallery_id
     )
-    variant_dirs = list(config['image_sizes'].keys()) + [METADATA_VARIANT_DIR]
+    variant_dirs = list(config['image_sizes'].keys()) + [METADATA_VARIANT_DIR, 'video']
     for variant_dir in variant_dirs:
         variant_path = os.path.join(gallery_variants_root, variant_dir)
         if not os.path.isdir(variant_path):

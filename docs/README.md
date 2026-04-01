@@ -67,11 +67,12 @@ This project uses `uv` as the Python dependency manager.
 
 1. Create a folder in `galleries` (recommended format: YYYYMMDD), and add a `gallery.yaml`
 2. Add your images and optional image metadata YAML files
-3. Run `bin/refresh.py --all` to update entire site, or if run for the first time
-4. Run `bin/refresh.py galleryname` to add/refresh that gallery
-5. Run `bin/serve.py` to start a development server with live reload
-6. It is safe to delete anything in `export` as long as you run `bin/refresh.py --all` afterward
-7. Run `git pull` for updates and new features
+3. **Videos (optional):** Install `ffmpeg` and `ffprobe` on your PATH. Put `.mp4`, `.mov`, or `.m4v` files in the gallery folder next to your photos (same directory as `gallery.yaml`). They are transcoded to H.264/AAC (max **120s** trim, **3 Mbps** at 720p-tier height / **5 Mbps** at 1080p-tier) plus a grid thumbnail; playback files are written under `export/.../galleries/<id>/video/`. Optional sidecar YAML next to each clip (e.g. `clip.yaml`) can set `title`, `caption`, and `tags`, same idea as photos.
+4. Run `bin/refresh.py --all` to update entire site, or if run for the first time
+5. Run `bin/refresh.py galleryname` to add/refresh that gallery
+6. Run `bin/serve.py` to start a development server with live reload
+7. It is safe to delete anything in `export` as long as you run `bin/refresh.py --all` afterward
+8. Run `git pull` for updates and new features
 
 ## Gallery Configuration
 

@@ -21,6 +21,7 @@ encrypted: true  # Only flag needed to enable encryption
 - **IV**: SHA-256(`imageId`)[:16] - unique per image
 - **Image ID**: For encrypted galleries: SHA-256(`galleryId:filename`)[:16]
   For unencrypted galleries: MD5(`galleryId:filename`)[:12]
+- **Video ID**: Same hash lengths as images, but the string is `galleryId:video:{basename}` (source clips live in `galleries/<id>/` next to images) so IDs never collide with photos.
 
 ### Gallery Metadata Structure
 The gallery metadata (stored in metadata/GALLERY_ID/index.json) includes:
@@ -66,7 +67,21 @@ export/galleries/YYYYMMDD/
 │   └── {encryptedBasename}.json  # Contains encrypted filename mapping
 └── thumbnail/
     └── {encryptedBasename}.jpg  # Filename from image metadata
+├── video/
+│   └── {encryptedBasename}.mp4  # Transcoded H.264/AAC (encrypted .enc in private mode)
 ```
+
+## Public manifest (`manifest.json`, schema v2)
+
+Encrypted galleries include a JSON manifest beside the gallery HTML:
+
+- **`schema_version`**: `2` (v2 adds video entries; v1 clients should ignore unknown keys).
+- **`images`**: Unchanged from v1: each item has `id`, `variants` (cover, full, thumbnail URLs), `metadata_url`.
+- **`videos`**: Each item has `id`, `variants` with exactly **`thumbnail`** and **`playback`** URLs, and `metadata_url`.
+- **Nonce material** (build time, envelope v1) for video assets uses prefixes:
+  - `pge-v1/gcm-nonce|video-thumbnail|{galleryId}|{videoId}|thumbnail`
+  - `pge-v1/gcm-nonce|video-playback|{galleryId}|{videoId}|playback`
+- **Encrypted video metadata blobs** use `inner_schema_version` **2** and include `"media_type": "video"` plus `video_id`, `filename`, `title`, `caption`, `exif`, `tags`.
 
 ## Processing Pipeline
 
@@ -131,17 +146,18 @@ The single image view template includes:
 Manages decryption and display of encrypted images:
 
 ```javascript
-new EncryptedGallery(galleryId, privateGalleryId, {
-    limits: {
-        full: 1,      // One full-size image
-        cover: 3,     // Three cover images
-        thumbnail: 10  // Ten thumbnails
-    },
+new EncryptedGallery(galleryId, {
+    maxBufferSize: 10,
+    maxConcurrentDecrypts: 3,
     mode: 'gallery',  // or 'single' for single image view
     imageSelector: '.encrypted-image',
     overlaySelector: '.encrypted-overlay'
 });
 ```
+
+### EncryptedVideoPage
+
+Video detail pages use `EncryptedVideoPage`, which decrypts the poster JPEG on load and decrypts the MP4 into a single cached object URL on first `play` (separate decrypt queue, max one playback blob).
 
 ### Image Loading States
 1. Initial State: SVG placeholder with lock icon
