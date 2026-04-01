@@ -14,9 +14,9 @@ The rest you do is your business.
 
 1. Copy `config.example.yaml` to `config.yaml` and make changes as desired.
 
-2. Install Python dependencies:
+2. Install Python dependencies with uv:
    ```bash
-   python -m pip install -r requirements.txt
+   uv sync --extra dev
    ```
 
 3. Install Node.js and npm:
@@ -33,6 +33,35 @@ The rest you do is your business.
    - Windows: Install via WSL or Cygwin
    - macOS: Included by default
    - Linux: `apt install rsync` or equivalent
+
+## Development Setup (uv)
+
+This project uses `uv` as the Python dependency manager.
+
+1. Ensure `uv` is installed:
+   ```bash
+   uv --version
+   ```
+
+2. Sync dependencies (including test tooling):
+   ```bash
+   uv sync --extra dev
+   ```
+
+3. Run Python tests in the uv-managed environment:
+   ```bash
+   uv run --extra dev python -m pytest tests/python/test_crypto_vectors.py
+   ```
+
+4. Run JS parity tests:
+   ```bash
+   node --test tests/js/crypto-vectors.test.mjs
+   ```
+
+5. Run both suites via npm scripts:
+   ```bash
+   npm run test:vectors
+   ```
 
 ## Usage
 
@@ -199,7 +228,7 @@ SSH:
 ## Requirements
 
 Core Dependencies:
-- Python 3.8+
+- Python 3.11+
 - Node.js and npm (for Tailwind CSS)
 - Pillow >= 9.0.0 (for image processing)
 - exif >= 1.3.0 (for EXIF metadata handling)

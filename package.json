@@ -1,4 +1,9 @@
 {
+  "scripts": {
+    "test:vectors:py": "uv run --extra dev python -m pytest tests/python/test_crypto_vectors.py",
+    "test:vectors:js": "node --test tests/js/crypto-vectors.test.mjs",
+    "test:vectors": "npm run test:vectors:py && npm run test:vectors:js"
+  },
   "dependencies": {
     "tailwindcss": "^3.4.10"
   }

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "vectors": [
+    {
+      "name": "base_vector_1",
+      "password": "correct horse battery staple",
+      "gallery_id": "20241006",
+      "salt_utf8_hex": "3230323431303036",
+      "storage_token_b64url": "1raps9OwornNuouXw5jh2fUYMwcJuDzhELINMeRBWRw",
+      "storage_token_hash_hex": "3de2c9b173c0442e75de738188fb1017e8ae4def33a3fb4648e3ff746c4b012c",
+      "image_key_hex": "9618eb54d569f75249681d7930de58b75599aecab782444c71e1d505465a1940",
+      "metadata_key_hex": "d567bc64290689748763fb6446c5f305280fb4aa4481cbf386ed47ee67a937d0",
+      "plaintext_utf8": "hello-envelope-v1",
+      "nonce_hex": "000102030405060708090a0b",
+      "ciphertext_with_tag_hex": "fb8c09808c57810a77abfd0cafbf19cfa445c19bec176f9dbeb39c4fc035a5e3f9",
+      "envelope_hex": "504745310101000000000000000102030405060708090a0bfb8c09808c57810a77abfd0cafbf19cfa445c19bec176f9dbeb39c4fc035a5e3f9"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+[project]
+name = "publicgallery"
+version = "0.1.0"
+description = "Static photo gallery build and encryption tooling."
+readme = "docs/README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "Pillow>=9.0.0",
+    "pillow-heif>=0.13.0",
+    "exif>=1.3.0",
+    "pyyaml>=6.0.0",
+    "rich>=12.0.0",
+    "Jinja2>=3.0.0",
+    "markdown>=3.4.0",
+    "plum-py>=0.8.0",
+    "boto3>=1.26.0",
+    "botocore>=1.29.0",
+    "cryptography>=37.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.0",
+]
