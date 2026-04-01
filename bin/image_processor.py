@@ -98,6 +98,8 @@ PLAINTEXT_VARIANT_EXTENSION = '.jpg'
 TEMP_PLAINTEXT_SUFFIX = '.tmp.jpg'
 METADATA_VARIANT_DIR = 'metadata'
 METADATA_BLOB_EXTENSION = '.enc'
+GCM_NONCE_MATERIAL_PREFIX_IMAGE_VARIANT = 'pge-v1/gcm-nonce|image-variant'
+GCM_NONCE_MATERIAL_PREFIX_METADATA_BLOB = 'pge-v1/gcm-nonce|metadata-blob'
 INNER_METADATA_SCHEMA_VERSION = 1
 STALE_ENCRYPTED_EXTENSIONS = (
     '.jpg',
@@ -275,13 +277,15 @@ def derive_encryption_params(gallery_id: str, image_id: str, password: str, sour
     
     return key
 
-def encrypt_file(file_path: str, key: bytes) -> bytes:
+def encrypt_file(file_path: str, key: bytes, nonce_material: bytes) -> bytes:
     """
     Encrypt file contents using envelope-v1 AES-256-GCM.
+
+    ``nonce_material`` must be unique for each encryption that uses the same key.
     """
     with open(file_path, 'rb') as f:
         data = f.read()
-    return encrypt_payload(data, key)
+    return encrypt_payload(data, key, nonce_material=nonce_material)
 
 def get_variant_extension(is_encrypted: bool) -> str:
     """Return expected variant file extension for the gallery mode."""
@@ -501,7 +505,12 @@ def write_encrypted_metadata_blob(output_metadata: dict, gallery_id: str, passwo
         separators=(',', ':'),
         ensure_ascii=True
     ).encode('utf-8')
-    encrypted_blob = encrypt_payload(inner_metadata_bytes, metadata_key)
+    nonce_material = (
+        f'{GCM_NONCE_MATERIAL_PREFIX_METADATA_BLOB}|{gallery_id}|{output_metadata["id"]}'
+    ).encode('utf-8')
+    encrypted_blob = encrypt_payload(
+        inner_metadata_bytes, metadata_key, nonce_material=nonce_material
+    )
     metadata_output_dir = os.path.join(
         config['output_path'],
         'public_html',
@@ -540,7 +549,10 @@ def process_image_variants(img: Image.Image, image_id: str, gallery_id: str,
                 
                 # Encrypt the file
                 key = derive_encryption_params(gallery_id, image_id, gallery_config['password'])
-                encrypted_data = encrypt_file(temp_path, key)
+                nonce_material = (
+                    f'{GCM_NONCE_MATERIAL_PREFIX_IMAGE_VARIANT}|{gallery_id}|{image_id}|{size_name}'
+                ).encode('utf-8')
+                encrypted_data = encrypt_file(temp_path, key, nonce_material)
                 
                 # Write encrypted data
                 with open(output_path, 'wb') as f:
@@ -714,8 +726,10 @@ def process_gallery(gallery: str) -> tuple[int, int]:
     if gallery_config.get('encrypted', False):
         clean_encrypted_variant_outputs(gallery)
     
-    images = [img for img in os.listdir(gallery_path) 
-             if img.lower().endswith(SUPPORTED_FORMATS)]
+    images = sorted(
+        img for img in os.listdir(gallery_path)
+        if img.lower().endswith(SUPPORTED_FORMATS)
+    )
     
     if not images:
         return success, failed
@@ -797,8 +811,10 @@ def main() -> None:
         # Count images in each gallery
         for gallery in gallery_paths:
             gallery_path = os.path.join(config['source_path'], gallery)
-            images = [img for img in os.listdir(gallery_path) 
-                     if img.lower().endswith(SUPPORTED_FORMATS)]
+            images = sorted(
+                img for img in os.listdir(gallery_path)
+                if img.lower().endswith(SUPPORTED_FORMATS)
+            )
             num_images = len(images)
             if num_images > 0:
                 galleries.append((gallery, images))

@@ -303,8 +303,10 @@ def process_gallery(gallery_path: str) -> dict:
     gallery_data['unlisted'] = resolve_unlisted(is_encrypted, gallery_config)
 
     metadata_dir = os.path.join(config['output_path'], 'metadata', gallery_id)
-    image_files = [f for f in os.listdir(metadata_dir) 
-                   if f != 'index.json' and f.endswith('.json')]
+    image_files = sorted(
+        f for f in os.listdir(metadata_dir)
+        if f != 'index.json' and f.endswith('.json')
+    )
     
     cleanup_occurred = False
     for metadata_file in image_files:
@@ -415,8 +417,10 @@ def main():
     for gallery in galleries:
         metadata_dir = os.path.join(config['output_path'], 'metadata', gallery)
         try:
-            image_files = [f for f in os.listdir(metadata_dir)
-                          if f.endswith('.json')]
+            image_files = sorted(
+                f for f in os.listdir(metadata_dir)
+                if f.endswith('.json')
+            )
         except FileNotFoundError:
             image_files = []
         num_images = len(image_files)

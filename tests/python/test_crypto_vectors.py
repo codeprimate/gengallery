@@ -15,7 +15,7 @@ from crypto_v1 import (  # noqa: E402
     derive_metadata_key_bytes,
     get_gallery_salt_bytes,
 )
-from envelope_v1 import parse_envelope, decrypt_payload  # noqa: E402
+from envelope_v1 import encrypt_payload, parse_envelope, decrypt_payload  # noqa: E402
 
 
 def load_vectors():
@@ -46,3 +46,13 @@ def test_envelope_vector_round_trip():
         image_key = bytes.fromhex(vector['image_key_hex'])
         plaintext = decrypt_payload(envelope_bytes, image_key)
         assert plaintext.decode('utf-8') == vector['plaintext_utf8']
+
+
+def test_encrypt_payload_with_nonce_material_is_deterministic():
+    key = bytes(32)
+    material = b'pge-test|gallery-a|img-1|full'
+    pt = b'hello'
+    first = encrypt_payload(pt, key, nonce_material=material)
+    second = encrypt_payload(pt, key, nonce_material=material)
+    assert first == second
+    assert decrypt_payload(first, key) == pt

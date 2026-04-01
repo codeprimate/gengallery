@@ -4,6 +4,7 @@
 Envelope-v1 serialization/parsing helpers for encrypted gallery artifacts.
 """
 
+import hashlib
 import os
 import struct
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -86,13 +87,24 @@ def parse_envelope(envelope_bytes: bytes) -> dict:
 def encrypt_payload(
     plaintext: bytes,
     key_bytes: bytes,
-    plaintext_header: bytes = b''
+    plaintext_header: bytes = b'',
+    *,
+    nonce_material: bytes | None = None,
 ) -> bytes:
-    """Encrypt plaintext as envelope-v1 AES-256-GCM."""
+    """Encrypt plaintext as envelope-v1 AES-256-GCM.
+
+    When ``nonce_material`` is set, the 12-byte GCM nonce is
+    ``SHA-256(nonce_material)[:12]``. Callers MUST ensure uniqueness for each
+    encryption that shares the same ``key_bytes`` (e.g. include gallery id,
+    image id, and variant name). When omitted, a random nonce is used.
+    """
     if len(key_bytes) != 32:
         raise ValueError('AES-256-GCM key must be 32 bytes')
 
-    nonce = os.urandom(NONCE_LENGTH_BYTES)
+    if nonce_material is not None:
+        nonce = hashlib.sha256(nonce_material).digest()[:NONCE_LENGTH_BYTES]
+    else:
+        nonce = os.urandom(NONCE_LENGTH_BYTES)
     aesgcm = AESGCM(key_bytes)
     ciphertext_with_tag = aesgcm.encrypt(nonce, plaintext, None)
     return serialize_envelope(nonce, ciphertext_with_tag, plaintext_header)
