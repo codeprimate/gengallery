@@ -63,7 +63,7 @@ from rich.panel import Panel
 from rich.text import Text
 import sys
 from pillow_heif import register_heif_opener
-from crypto_v1 import derive_storage_token_bytes, derive_image_key_bytes
+from crypto_v1 import derive_storage_token_bytes, derive_image_key_bytes, derive_metadata_key_bytes
 from envelope_v1 import encrypt_payload, decrypt_payload
 
 # Suppress specific warnings
@@ -97,6 +97,8 @@ ENCRYPTED_VARIANT_EXTENSION = '.enc'
 PLAINTEXT_VARIANT_EXTENSION = '.jpg'
 TEMP_PLAINTEXT_SUFFIX = '.tmp.jpg'
 METADATA_VARIANT_DIR = 'metadata'
+METADATA_BLOB_EXTENSION = '.enc'
+INNER_METADATA_SCHEMA_VERSION = 1
 STALE_ENCRYPTED_EXTENSIONS = (
     '.jpg',
     '.jpeg',
@@ -358,6 +360,20 @@ def check_output_files(image_path: str, gallery_id: str, image_id: str, is_encry
         return False
     if os.path.getmtime(metadata_path) < latest_source_mtime:
         return False
+
+    if is_encrypted:
+        metadata_blob_path = os.path.join(
+            config['output_path'],
+            'public_html',
+            'galleries',
+            gallery_id,
+            METADATA_VARIANT_DIR,
+            f"{image_id}{METADATA_BLOB_EXTENSION}"
+        )
+        if not os.path.exists(metadata_blob_path):
+            return False
+        if os.path.getmtime(metadata_blob_path) < latest_source_mtime:
+            return False
     
     return True
 
@@ -432,7 +448,7 @@ def create_metadata_dict(image_path: str, image_id: str, gallery_id: str,
     filename = os.path.basename(image_path)
     
     variant_extension = get_variant_extension(is_encrypted)
-    return {
+    metadata = {
         "id": image_id,
         "filename": filename,
         "url": f"/galleries/{gallery_id}/{image_id}.html",
@@ -446,6 +462,46 @@ def create_metadata_dict(image_path: str, image_id: str, gallery_id: str,
         "lon": lon,
         "exif": exif_data
     }
+    if is_encrypted:
+        metadata["metadata_path"] = f"/galleries/{gallery_id}/{METADATA_VARIANT_DIR}/{image_id}{METADATA_BLOB_EXTENSION}"
+    return metadata
+
+def create_inner_metadata_dict(output_metadata: dict) -> dict:
+    """Create inner metadata JSON schema for encrypted metadata blob."""
+    return {
+        "inner_schema_version": INNER_METADATA_SCHEMA_VERSION,
+        "image_id": output_metadata["id"],
+        "filename": output_metadata["filename"],
+        "title": output_metadata.get("title", ""),
+        "caption": output_metadata.get("caption", ""),
+        "exif": output_metadata.get("exif", {}),
+        "tags": output_metadata.get("tags", [])
+    }
+
+def write_encrypted_metadata_blob(output_metadata: dict, gallery_id: str, password: str) -> None:
+    """Emit encrypted metadata blob under public_html for encrypted galleries."""
+    storage_token_bytes = derive_storage_token_bytes(password, gallery_id)
+    metadata_key = derive_metadata_key_bytes(storage_token_bytes, gallery_id)
+    inner_metadata_bytes = json.dumps(
+        create_inner_metadata_dict(output_metadata),
+        separators=(',', ':'),
+        ensure_ascii=True
+    ).encode('utf-8')
+    encrypted_blob = encrypt_payload(inner_metadata_bytes, metadata_key)
+    metadata_output_dir = os.path.join(
+        config['output_path'],
+        'public_html',
+        'galleries',
+        gallery_id,
+        METADATA_VARIANT_DIR
+    )
+    os.makedirs(metadata_output_dir, exist_ok=True)
+    metadata_blob_path = os.path.join(
+        metadata_output_dir,
+        f"{output_metadata['id']}{METADATA_BLOB_EXTENSION}"
+    )
+    with open(metadata_blob_path, 'wb') as metadata_blob_file:
+        metadata_blob_file.write(encrypted_blob)
 
 def process_image_variants(img: Image.Image, image_id: str, gallery_id: str, 
                          is_encrypted: bool, gallery_config: dict) -> None:
@@ -529,6 +585,8 @@ def process_image(image_path: str, gallery_id: str, gallery_config: dict, progre
 
         # Process image variants
         process_image_variants(img, image_id, gallery_id, is_encrypted, gallery_config)
+        if is_encrypted:
+            write_encrypted_metadata_blob(output_metadata, gallery_id, gallery_config['password'])
         if progress:
             progress.update(task, completed=90)
 

@@ -80,15 +80,32 @@ def cleanup_missing_image(gallery_id: str, image_metadata: dict, source_path: st
         os.remove(metadata_path)
         console.print(f"  [yellow]→[/] Removed image metadata: [blue]{metadata_path}[/]")
     
-    # Remove processed images
+    # Remove processed images (legacy fallback paths)
     for size_name in config['image_sizes'].keys():
-        output_image_path = os.path.join(
+        legacy_output_image_path = os.path.join(
             config['output_path'], 'public_html', 'galleries',
             gallery_id, size_name, f"{image_metadata['id']}.jpg"
         )
-        if os.path.exists(output_image_path):
-            os.remove(output_image_path)
-            console.print(f"  [yellow]→[/] Removed image: [blue]{output_image_path}[/]")
+        encrypted_output_image_path = os.path.join(
+            config['output_path'], 'public_html', 'galleries',
+            gallery_id, size_name, f"{image_metadata['id']}.enc"
+        )
+        for output_image_path in (legacy_output_image_path, encrypted_output_image_path):
+            if os.path.exists(output_image_path):
+                os.remove(output_image_path)
+                console.print(f"  [yellow]→[/] Removed image: [blue]{output_image_path}[/]")
+
+    # Remove metadata blob if present
+    metadata_blob_relpath = image_metadata.get('metadata_path', '')
+    if metadata_blob_relpath:
+        metadata_blob_path = os.path.join(
+            config['output_path'],
+            'public_html',
+            metadata_blob_relpath.lstrip('/')
+        )
+        if os.path.exists(metadata_blob_path):
+            os.remove(metadata_blob_path)
+            console.print(f"  [yellow]→[/] Removed metadata blob: [blue]{metadata_blob_path}[/]")
             
     return True
 
