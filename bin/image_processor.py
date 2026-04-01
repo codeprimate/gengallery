@@ -97,6 +97,23 @@ with open('config.yaml', 'r') as f:
     config = yaml.safe_load(f)
 
 console = Console()
+ENCRYPTED_VARIANT_EXTENSION = '.enc'
+PLAINTEXT_VARIANT_EXTENSION = '.jpg'
+TEMP_PLAINTEXT_SUFFIX = '.tmp.jpg'
+METADATA_VARIANT_DIR = 'metadata'
+STALE_ENCRYPTED_EXTENSIONS = (
+    '.jpg',
+    '.jpeg',
+    '.png',
+    '.webp',
+    '.gif',
+    '.bmp',
+    '.tif',
+    '.tiff',
+    '.temp',
+    '.bin',
+    '.encrypted'
+)
 
 def generate_image_id(image_path: str, gallery_id: str) -> str:
     """
@@ -291,7 +308,34 @@ def encrypt_file(file_path: str, key: bytes, iv: bytes) -> bytes:
     # Return encrypted data only - IV is derived deterministically on client
     return encrypted_data
 
-def check_output_files(image_path: str, gallery_id: str, image_id: str) -> bool:
+def get_variant_extension(is_encrypted: bool) -> str:
+    """Return expected variant file extension for the gallery mode."""
+    return ENCRYPTED_VARIANT_EXTENSION if is_encrypted else PLAINTEXT_VARIANT_EXTENSION
+
+def clean_encrypted_variant_outputs(gallery_id: str) -> None:
+    """
+    Remove stale plaintext and legacy encrypted variant artifacts for encrypted galleries.
+    """
+    gallery_variants_root = os.path.join(
+        config['output_path'],
+        'public_html',
+        'galleries',
+        gallery_id
+    )
+    variant_dirs = list(config['image_sizes'].keys()) + [METADATA_VARIANT_DIR]
+    for variant_dir in variant_dirs:
+        variant_path = os.path.join(gallery_variants_root, variant_dir)
+        if not os.path.isdir(variant_path):
+            continue
+        for file_name in os.listdir(variant_path):
+            full_path = os.path.join(variant_path, file_name)
+            if not os.path.isfile(full_path):
+                continue
+            lower_name = file_name.lower()
+            if lower_name.endswith(STALE_ENCRYPTED_EXTENSIONS):
+                os.remove(full_path)
+
+def check_output_files(image_path: str, gallery_id: str, image_id: str, is_encrypted: bool) -> bool:
     """
     Check if all output files exist and are newer than source files.
 
@@ -315,6 +359,7 @@ def check_output_files(image_path: str, gallery_id: str, image_id: str) -> bool:
     latest_source_mtime = max(source_mtimes)
     
     # Check each size variant
+    variant_extension = get_variant_extension(is_encrypted)
     for size_name in config['image_sizes'].keys():
         output_path = os.path.join(
             config['output_path'], 
@@ -322,7 +367,7 @@ def check_output_files(image_path: str, gallery_id: str, image_id: str) -> bool:
             'galleries',
             gallery_id, 
             size_name,
-            f"{image_id}.jpg"
+            f"{image_id}{variant_extension}"
         )
         if not os.path.exists(output_path):
             return False
@@ -413,21 +458,22 @@ def extract_image_data(image_path: str, img_file, img: Image.Image) -> tuple[dic
     
     return exif_data, lat, lon
 
-def create_metadata_dict(image_path: str, image_id: str, gallery_id: str, 
-                        exif_data: dict, lat: float, lon: float) -> dict:
+def create_metadata_dict(image_path: str, image_id: str, gallery_id: str,
+                        exif_data: dict, lat: float, lon: float, is_encrypted: bool) -> dict:
     """
     Create the metadata dictionary for an image.
     """
     image_metadata = get_image_metadata(image_path)
     filename = os.path.basename(image_path)
     
+    variant_extension = get_variant_extension(is_encrypted)
     return {
         "id": image_id,
         "filename": filename,
         "url": f"/galleries/{gallery_id}/{image_id}.html",
-        "path": f"/galleries/{gallery_id}/full/{image_id}.jpg",
-        "thumbnail_path": f"/galleries/{gallery_id}/thumbnail/{image_id}.jpg",
-        "cover_path": f"/galleries/{gallery_id}/cover/{image_id}.jpg",
+        "path": f"/galleries/{gallery_id}/full/{image_id}{variant_extension}",
+        "thumbnail_path": f"/galleries/{gallery_id}/thumbnail/{image_id}{variant_extension}",
+        "cover_path": f"/galleries/{gallery_id}/cover/{image_id}{variant_extension}",
         "title": image_metadata.get('title', os.path.splitext(filename)[0].replace('_', ' ').title()),
         "caption": image_metadata.get('caption', ''),
         "tags": image_metadata.get('tags', []),
@@ -445,13 +491,14 @@ def process_image_variants(img: Image.Image, image_id: str, gallery_id: str,
         output_dir = os.path.join(config['output_path'], 'public_html', 'galleries', 
                                 gallery_id, size_name)
         os.makedirs(output_dir, exist_ok=True)
-        output_path = os.path.join(output_dir, f"{image_id}.jpg")
+        variant_extension = get_variant_extension(is_encrypted)
+        output_path = os.path.join(output_dir, f"{image_id}{variant_extension}")
         
         img_copy = img.copy()
         img_copy.thumbnail((max_size, max_size))
         
         if is_encrypted:
-            temp_path = output_path + '.temp'
+            temp_path = os.path.join(output_dir, f"{image_id}{TEMP_PLAINTEXT_SUFFIX}")
             try:
                 # Save unencrypted version to temp file
                 img_copy.save(temp_path, "JPEG", quality=config['jpg_quality'])
@@ -463,12 +510,11 @@ def process_image_variants(img: Image.Image, image_id: str, gallery_id: str,
                 # Write encrypted data
                 with open(output_path, 'wb') as f:
                     f.write(encrypted_data)
-                
-                os.unlink(temp_path)
             except Exception as e:
+                raise ValueError(f"Encryption failed: {str(e)}")
+            finally:
                 if os.path.exists(temp_path):
                     os.unlink(temp_path)
-                raise ValueError(f"Encryption failed: {str(e)}")
         else:
             img_copy.save(output_path, "JPEG", quality=config['jpg_quality'])
 
@@ -484,7 +530,7 @@ def process_image(image_path: str, gallery_id: str, gallery_config: dict, progre
     image_id = (hashlib.sha256(f"{gallery_id}:{filename}".encode()).hexdigest()[:16] 
                 if is_encrypted else generate_image_id(filename, gallery_id))
 
-    if check_output_files(image_path, gallery_id, image_id):
+    if check_output_files(image_path, gallery_id, image_id, is_encrypted):
         if progress:
             task = progress.add_task(
                 f"[green]✓ Skipping {filename}[/] ({image_number}/{total_images})",
@@ -512,7 +558,7 @@ def process_image(image_path: str, gallery_id: str, gallery_config: dict, progre
             progress.update(task, completed=25)
 
         # Create metadata dictionary
-        output_metadata = create_metadata_dict(image_path, image_id, gallery_id, exif_data, lat, lon)
+        output_metadata = create_metadata_dict(image_path, image_id, gallery_id, exif_data, lat, lon, is_encrypted)
         if progress:
             progress.update(task, completed=40)
 
@@ -621,6 +667,8 @@ def process_gallery(gallery: str) -> tuple[int, int]:
     gallery_config_path = os.path.join(gallery_path, 'gallery.yaml')
     with open(gallery_config_path, 'r') as f:
         gallery_config = yaml.safe_load(f)
+    if gallery_config.get('encrypted', False):
+        clean_encrypted_variant_outputs(gallery)
     
     images = [img for img in os.listdir(gallery_path) 
              if img.lower().endswith(SUPPORTED_FORMATS)]

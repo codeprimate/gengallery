@@ -34,7 +34,7 @@
                     <!-- Added relative positioning and proper overlay -->
                     <img class="encrypted-image w-full h-64 object-cover md:h-full" 
                          src="#encrypted-placeholder"
-                         data-encrypted-url="/galleries/{{ gallery.id }}/cover/{{ gallery.cover.id }}.jpg"
+                         data-encrypted-url="{{ gallery.cover.path }}"
                          data-encrypted-type="cover"
                          alt="Encrypted Image">
                     <div class="encrypted-overlay absolute inset-0 bg-gray-100 bg-opacity-75 flex items-center justify-center">
@@ -100,7 +100,7 @@
                 <a href="{{ image.url }}" class="block relative">
                     <img class="encrypted-image w-full h-48 object-cover" 
                          src="#encrypted-placeholder"
-                         data-encrypted-url="/galleries/{{ gallery.id }}/thumbnail/{{ image.id }}.jpg"
+                         data-encrypted-url="{{ image.thumbnail_path }}"
                          data-encrypted-type="thumbnail"
                          alt="{{ image.title }}">
                     
