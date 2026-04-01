@@ -1,15 +1,53 @@
 /**
  * Handles gallery login functionality and password verification.
  */
-const STORAGE_TOKEN_PREFIX = 'pge.v1.storage_token.';
+const STORAGE_TOKEN_NAMESPACE = 'pge';
+const STORAGE_TOKEN_VERSION = 'v1';
+const STORAGE_TOKEN_KIND = 'storage_token';
+const STORAGE_TOKEN_SEPARATOR = '.';
+const STORAGE_TOKEN_PREFIX = `${STORAGE_TOKEN_NAMESPACE}${STORAGE_TOKEN_SEPARATOR}${STORAGE_TOKEN_VERSION}${STORAGE_TOKEN_SEPARATOR}${STORAGE_TOKEN_KIND}${STORAGE_TOKEN_SEPARATOR}`;
 const LEGACY_PRIVATE_ID_PREFIX = 'gallery_';
+const LEGACY_STORAGE_TOKEN_PREFIXES = [
+    'pge.storage_token.',
+    'storage_token.',
+    'storage_token_'
+];
+const DIAGNOSTIC_SUPPRESSION_NOTICE = 'Further runtime diagnostics suppressed';
 const PROTECTED_GALLERY_PAGE = 'gallery.html';
 const STORAGE_TOKEN_INFO_PREFIX = 'pge/v1/storage_token:';
 const IMAGE_KEY_INFO = 'pge/v1/key:image';
 const DERIVED_KEY_LENGTH_BYTES = 32;
+const MAX_LOGIN_DIAGNOSTIC_LOGS = 3;
 
 function utf8Bytes(value) {
     return new TextEncoder().encode(value);
+}
+
+function buildStorageTokenKey(galleryId) {
+    return `${STORAGE_TOKEN_PREFIX}${galleryId}`;
+}
+
+function getLegacyStorageKeysForGallery(galleryId) {
+    const keys = [`${LEGACY_PRIVATE_ID_PREFIX}${galleryId}_private_id`];
+    for (const prefix of LEGACY_STORAGE_TOKEN_PREFIXES) {
+        keys.push(`${prefix}${galleryId}`);
+    }
+    return keys;
+}
+
+function clearStorageKeysForGallery(storage, galleryId) {
+    storage.removeItem(buildStorageTokenKey(galleryId));
+    for (const staleKey of getLegacyStorageKeysForGallery(galleryId)) {
+        storage.removeItem(staleKey);
+    }
+}
+
+function logSafeDiagnostic(category, details = {}) {
+    const safeDetails = {
+        category,
+        ...details
+    };
+    console.warn('Encrypted runtime diagnostic', safeDetails);
 }
 
 function bytesToHex(bytes) {
@@ -74,6 +112,7 @@ class GalleryLogin {
         this.passwordInput = document.getElementById('password');
         this.submitButton = document.getElementById('submitButton');
         this.errorMessage = document.getElementById('errorMessage');
+        this.diagnosticLogCount = 0;
 
         this.init();
     }
@@ -83,7 +122,7 @@ class GalleryLogin {
      * @returns {Promise<void>}
      */
     async init() {
-        this.clearLegacyCredentialKey();
+        this.clearStaleCredentialKeys();
         const hasValidCredentials = await this.checkSavedCredentials();
         if (!hasValidCredentials) {
             this.loadingState.classList.add('hidden');
@@ -124,7 +163,7 @@ class GalleryLogin {
      * @param {string} storageToken - Storage token to save
      */
     saveStorageToken(storageToken) {
-        localStorage.setItem(`${STORAGE_TOKEN_PREFIX}${this.galleryId}`, storageToken);
+        localStorage.setItem(buildStorageTokenKey(this.galleryId), storageToken);
     }
 
     /**
@@ -132,14 +171,30 @@ class GalleryLogin {
      * @returns {string|null} Saved storage token or null if not found
      */
     getSavedStorageToken() {
-        return localStorage.getItem(`${STORAGE_TOKEN_PREFIX}${this.galleryId}`);
+        return localStorage.getItem(buildStorageTokenKey(this.galleryId));
     }
 
     /**
      * Removes legacy storage keys from pre-v1 login model.
      */
-    clearLegacyCredentialKey() {
-        localStorage.removeItem(`${LEGACY_PRIVATE_ID_PREFIX}${this.galleryId}_private_id`);
+    clearStaleCredentialKeys() {
+        const staleKeys = getLegacyStorageKeysForGallery(this.galleryId);
+        for (const staleKey of staleKeys) {
+            if (staleKey !== buildStorageTokenKey(this.galleryId)) {
+                localStorage.removeItem(staleKey);
+            }
+        }
+    }
+
+    logDiagnostic(category, details = {}) {
+        if (this.diagnosticLogCount >= MAX_LOGIN_DIAGNOSTIC_LOGS) {
+            return;
+        }
+        logSafeDiagnostic(category, { galleryId: this.galleryId, ...details });
+        this.diagnosticLogCount += 1;
+        if (this.diagnosticLogCount === MAX_LOGIN_DIAGNOSTIC_LOGS) {
+            console.warn(DIAGNOSTIC_SUPPRESSION_NOTICE, { category });
+        }
     }
 
     /**
@@ -157,7 +212,8 @@ class GalleryLogin {
                     return true;
                 }
             } catch (error) {
-                localStorage.removeItem(`${STORAGE_TOKEN_PREFIX}${this.galleryId}`);
+                localStorage.removeItem(buildStorageTokenKey(this.galleryId));
+                this.logDiagnostic('ERR_STORED_TOKEN_INVALID', { flow: 'auto-login' });
             }
         }
         return false;
@@ -186,7 +242,7 @@ class GalleryLogin {
                 this.errorMessage.classList.remove('hidden');
             }
         } catch (error) {
-            console.error('Hashing error:', error);
+            this.logDiagnostic('ERR_PASSWORD_VERIFICATION_FAILED', { flow: 'submit' });
             this.errorMessage.textContent = 'An error occurred. Please try again.';
             this.errorMessage.classList.remove('hidden');
         }
@@ -251,8 +307,7 @@ class GalleryLock {
         }
 
         // Clear all sensitive data from localStorage
-        localStorage.removeItem(`${STORAGE_TOKEN_PREFIX}${this.galleryId}`);
-        localStorage.removeItem(`${LEGACY_PRIVATE_ID_PREFIX}${this.galleryId}_private_id`);
+        clearStorageKeysForGallery(localStorage, this.galleryId);
 
         // Clear any sensitive data from memory
         // Force garbage collection hints on sensitive data
@@ -415,7 +470,7 @@ class EncryptedGallery {
      */
     constructor(galleryId, options = {}) {
         this.galleryId = galleryId;
-        this.storageToken = localStorage.getItem(`${STORAGE_TOKEN_PREFIX}${this.galleryId}`);
+        this.storageToken = localStorage.getItem(buildStorageTokenKey(this.galleryId));
         this.manifestUrl = options.manifestUrl || '';
         this.options = {
             placeholderSelector: options.placeholderSelector || '#encrypted-placeholder',
@@ -476,7 +531,7 @@ class EncryptedGallery {
             await this.decryptNavigationThumbnails();
 
         } catch (error) {
-            console.error('Decryption failed:', error);
+            this.logError('ERR_SINGLE_IMAGE_DECRYPT', { galleryId: this.galleryId });
             const overlay = mainImage.parentElement.querySelector(this.options.overlaySelector);
             if (overlay) {
                 overlay.innerHTML = '<div class="text-red-600">Decryption failed</div>';
@@ -498,7 +553,7 @@ class EncryptedGallery {
                     const objectUrl = this.objectUrlCache.set(url, decryptedBlob);
                     thumb.src = objectUrl;
                 } catch (error) {
-                    console.error('Navigation thumbnail decryption failed:', error);
+                    this.logError('ERR_NAV_THUMBNAIL_DECRYPT', { galleryId: this.galleryId });
                 }
             }
         }
@@ -587,7 +642,7 @@ class EncryptedGallery {
             if (overlay) overlay.style.display = 'none';
 
         } catch (error) {
-            this.logError('Decryption failed for', url, error);
+            this.logError('ERR_DECRYPT_OPERATION', { galleryId: this.galleryId, assetUrl: url });
             this.failedImages.add(url);
             
             if (overlay) {
@@ -671,13 +726,13 @@ class EncryptedGallery {
      * Handles error logging.
      * @param {...any} args - Error arguments
      */
-    logError(...args) {
+    logError(category, details = {}) {
         if (this.errorLogCount < this.maxErrorLogs) {
-            console.error(...args);
+            logSafeDiagnostic(category, details);
             this.errorLogCount++;
             
             if (this.errorLogCount === this.maxErrorLogs) {
-                console.warn('Further errors will be suppressed');
+                console.warn(DIAGNOSTIC_SUPPRESSION_NOTICE, { category });
             }
         }
     }
@@ -717,7 +772,7 @@ class EncryptedGallery {
             window.open(objectUrl);
 
         } catch (error) {
-            this.logError('Full image decryption failed:', error);
+            this.logError('ERR_FULL_IMAGE_DECRYPT', { galleryId: this.galleryId, assetUrl: fullUrl });
             alert('Failed to load full image');
         } finally {
             const overlay = img.parentElement.querySelector(this.options.overlaySelector);
@@ -742,4 +797,12 @@ async function deriveEncryptionParams(galleryId, storageToken) {
         false,
         ['decrypt']
     );
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        buildStorageTokenKey,
+        getLegacyStorageKeysForGallery,
+        clearStorageKeysForGallery
+    };
 }

@@ -473,22 +473,14 @@ def main():
         stage_times['finalize'] = datetime.now() - stage_start
         console.print(f"[green]✓[/green] [dim]Completed in {stage_times['finalize'].total_seconds():.1f}s[/dim]")
 
-        # Add password summary section
+        # Add protected gallery summary without secret output
         protected_galleries = [g for g in galleries_data['galleries'] if g.get('requires_login', False)]
-        console.print(f"\n[bold blue]Password Protected Galleries ({len(protected_galleries)}):[/bold blue]")
+        console.print(f"\n[bold blue]Protected Galleries ({len(protected_galleries)}):[/bold blue]")
         if protected_galleries:
             for gallery in protected_galleries:
-                # Load the gallery's YAML file to get the password
-                gallery_yaml_path = os.path.join('galleries', gallery['id'], 'gallery.yaml')
-                try:
-                    with open(gallery_yaml_path, 'r') as f:
-                        gallery_config = yaml.safe_load(f)
-                        password = gallery_config.get('password', 'No password found')
-                        console.print(f"[yellow]→[/yellow] [blue]{gallery['title']}[/blue]")
-                        console.print(f"  [red]Password:[/red] [bold]{password}[/bold]")
-                except FileNotFoundError:
-                    console.print(f"[yellow]→[/yellow] [blue]{gallery['title']}[/blue]")
-                    console.print(f"  [red]Error:[/red] Gallery YAML file not found")
+                mode = "Encrypted" if gallery.get('encrypted', False) else "Password-only"
+                console.print(f"[yellow]→[/yellow] [blue]{gallery['title']}[/blue]")
+                console.print(f"  [green]Mode:[/green] {mode}")
         else:
             console.print("[dim]No password protected galleries found[/dim]")
 
