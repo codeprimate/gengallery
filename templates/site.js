@@ -3,6 +3,60 @@
  */
 const STORAGE_TOKEN_PREFIX = 'pge.v1.storage_token.';
 const PROTECTED_GALLERY_PAGE = 'gallery.html';
+const STORAGE_TOKEN_INFO_PREFIX = 'pge/v1/storage_token:';
+const IMAGE_KEY_INFO = 'pge/v1/key:image';
+const DERIVED_KEY_LENGTH_BYTES = 32;
+
+function utf8Bytes(value) {
+    return new TextEncoder().encode(value);
+}
+
+function bytesToHex(bytes) {
+    return Array.from(bytes).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function bytesToBase64url(bytes) {
+    const binary = String.fromCharCode(...bytes);
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function base64urlToBytes(value) {
+    const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+    const padding = '='.repeat((4 - (normalized.length % 4)) % 4);
+    const binary = atob(normalized + padding);
+    return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
+async function sha256Bytes(inputBytes) {
+    const digest = await crypto.subtle.digest('SHA-256', inputBytes);
+    return new Uint8Array(digest);
+}
+
+async function hkdfSha256(ikmBytes, saltBytes, infoBytes, lengthBytes) {
+    const keyMaterial = await crypto.subtle.importKey('raw', ikmBytes, 'HKDF', false, ['deriveBits']);
+    const derivedBits = await crypto.subtle.deriveBits(
+        {
+            name: 'HKDF',
+            hash: 'SHA-256',
+            salt: saltBytes,
+            info: infoBytes
+        },
+        keyMaterial,
+        lengthBytes * 8
+    );
+    return new Uint8Array(derivedBits);
+}
+
+async function deriveStorageTokenBytes(password, galleryId) {
+    const saltBytes = utf8Bytes(galleryId);
+    const infoBytes = utf8Bytes(`${STORAGE_TOKEN_INFO_PREFIX}${galleryId}`);
+    return hkdfSha256(utf8Bytes(password), saltBytes, infoBytes, DERIVED_KEY_LENGTH_BYTES);
+}
+
+async function deriveImageKeyBytes(storageTokenBytes, galleryId) {
+    const saltBytes = utf8Bytes(galleryId);
+    return hkdfSha256(storageTokenBytes, saltBytes, utf8Bytes(IMAGE_KEY_INFO), DERIVED_KEY_LENGTH_BYTES);
+}
 
 class GalleryLogin {
     /**
@@ -40,27 +94,9 @@ class GalleryLogin {
         this.loginForm.addEventListener('submit', this.handleSubmit.bind(this));
     }
 
-    /**
-     * Generates a SHA-256 hash of the input string.
-     * @param {string} input - String to hash
-     * @returns {Promise<string>} Hexadecimal hash string
-     */
-    async hashString(input) {
-        const encoder = new TextEncoder();
-        const data = encoder.encode(input);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    }
-
-    /**
-     * Derives a candidate storage token from the gallery ID and password.
-     * @param {string} password - User provided password
-     * @returns {Promise<string>} Truncated hash string (16 characters)
-     */
     async deriveCandidateStorageToken(password) {
-        const hashHex = await this.hashString(`${this.galleryId}:${password}`);
-        return hashHex.slice(0, 16); // Truncate to 16 characters
+        const storageTokenBytes = await deriveStorageTokenBytes(password, this.galleryId);
+        return bytesToBase64url(storageTokenBytes);
     }
 
     /**
@@ -102,10 +138,15 @@ class GalleryLogin {
     async checkSavedCredentials() {
         const savedStorageToken = this.getSavedStorageToken();
         if (savedStorageToken) {
-            const savedStorageTokenHash = await this.hashString(savedStorageToken);
-            if (savedStorageTokenHash === this.storageTokenHashHex) {
-                this.redirectToGallery();
-                return true;
+            try {
+                const savedStorageTokenBytes = base64urlToBytes(savedStorageToken);
+                const savedStorageTokenHash = bytesToHex(await sha256Bytes(savedStorageTokenBytes));
+                if (savedStorageTokenHash === this.storageTokenHashHex) {
+                    this.redirectToGallery();
+                    return true;
+                }
+            } catch (error) {
+                localStorage.removeItem(`${STORAGE_TOKEN_PREFIX}${this.galleryId}`);
             }
         }
         return false;
@@ -122,7 +163,8 @@ class GalleryLogin {
 
         try {
             const assertedStorageToken = await this.deriveCandidateStorageToken(password);
-            const assertedStorageTokenHash = await this.hashString(assertedStorageToken);
+            const assertedStorageTokenBytes = base64urlToBytes(assertedStorageToken);
+            const assertedStorageTokenHash = bytesToHex(await sha256Bytes(assertedStorageTokenBytes));
 
             if (assertedStorageTokenHash === this.storageTokenHashHex) {
                 this.saveStorageToken(assertedStorageToken);
@@ -567,25 +609,17 @@ class EncryptedGallery {
  * @returns {Promise<{key: CryptoKey, iv: Uint8Array}>}
  */
 async function deriveEncryptionParams(galleryId, imageId, storageToken) {
-    const encoder = new TextEncoder();
-    
-    // Hash the private gallery ID to get a consistent key length
-    const keyBuffer = await crypto.subtle.digest(
-        'SHA-256',
-        encoder.encode(storageToken)
-    );
+    const storageTokenBytes = base64urlToBytes(storageToken);
+    const imageKeyBytes = await deriveImageKeyBytes(storageTokenBytes, galleryId);
     
     // Get IV from image ID hash (matching Python)
-    const ivBuffer = await crypto.subtle.digest(
-        'SHA-256',
-        encoder.encode(imageId)
-    );
+    const ivBuffer = await crypto.subtle.digest('SHA-256', utf8Bytes(imageId));
     const iv = new Uint8Array(ivBuffer.slice(0, 16));
     
     // Import the derived bits as an AES-CBC key
     const key = await crypto.subtle.importKey(
         'raw',
-        keyBuffer,
+        imageKeyBytes,
         { name: 'AES-CBC' },
         false,
         ['decrypt']

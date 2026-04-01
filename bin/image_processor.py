@@ -57,18 +57,15 @@ import yaml
 from fractions import Fraction
 import hashlib
 import warnings
-import secrets  # Add this import for secure random bytes generation
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-import base64
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, TimeRemainingColumn
 from rich.panel import Panel
 from rich.text import Text
 import sys
 from pillow_heif import register_heif_opener
+from crypto_v1 import derive_storage_token_bytes, derive_image_key_bytes
 
 # Suppress specific warnings
 warnings.filterwarnings("ignore", category=Image.DecompressionBombWarning)
@@ -275,12 +272,8 @@ def derive_encryption_params(gallery_id: str, image_id: str, password: str, sour
         generated for the same input parameters, allowing for deterministic
         encryption/decryption across different sessions.
     """
-    # First generate the private gallery ID (this matches the client-side logic)
-    combined = f"{gallery_id}:{password}"
-    private_gallery_id = hashlib.sha256(combined.encode()).hexdigest()[:16]
-    
-    # Use the private gallery ID to generate the encryption key
-    key = hashlib.sha256(private_gallery_id.encode()).digest()
+    storage_token_bytes = derive_storage_token_bytes(password, gallery_id)
+    key = derive_image_key_bytes(storage_token_bytes, gallery_id)
     
     # Generate IV from image ID
     iv = hashlib.sha256(image_id.encode()).digest()[:16]

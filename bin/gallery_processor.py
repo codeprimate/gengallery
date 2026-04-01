@@ -24,12 +24,18 @@ import yaml
 import sys
 from datetime import datetime
 import hashlib
+import base64
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
+from crypto_v1 import (
+    derive_storage_token_bytes,
+    derive_storage_token_hash_hex,
+    get_gallery_salt_bytes,
+    STORAGE_TOKEN_INFO_PREFIX,
+)
 
 console = Console()
-STORAGE_TOKEN_LABEL = 'pge/v1/storage_token'
 
 # Load configuration
 with open('config.yaml', 'r') as f:
@@ -172,12 +178,12 @@ def process_gallery(gallery_path: str) -> dict:
     # Process Security data
     
     if password:
-        # Temporary verifier until v1 HKDF/token derivation lands.
-        legacy_storage_token = hashlib.sha256(f"{gallery_id}:{password}".encode('utf-8')).hexdigest()[:16]
-        storage_token_hash_hex = hashlib.sha256(legacy_storage_token.encode('utf-8')).hexdigest()
+        storage_token_bytes = derive_storage_token_bytes(password, gallery_id)
+        storage_token_hash_hex = derive_storage_token_hash_hex(storage_token_bytes)
+        salt_b64 = base64.urlsafe_b64encode(get_gallery_salt_bytes(gallery_id)).decode('ascii').rstrip('=')
         gallery_data['requires_login'] = True
-        gallery_data['storage_token_label'] = STORAGE_TOKEN_LABEL
-        gallery_data['salt_b64'] = ''
+        gallery_data['storage_token_label'] = STORAGE_TOKEN_INFO_PREFIX.rstrip(':')
+        gallery_data['salt_b64'] = salt_b64
         gallery_data['storage_token_hash_hex'] = storage_token_hash_hex
     else:
         gallery_data['requires_login'] = False
