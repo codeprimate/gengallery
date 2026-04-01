@@ -29,6 +29,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 console = Console()
+STORAGE_TOKEN_LABEL = 'pge/v1/storage_token'
 
 # Load configuration
 with open('config.yaml', 'r') as f:
@@ -110,8 +111,10 @@ def process_gallery(gallery_path: str) -> dict:
                 "tags": List[str],            # List of gallery tags
                 "content": str,               # Additional content/notes
                 "images": List[dict],         # List of image metadata dictionaries
-                "private_gallery_id": str,    # Generated ID for password-protected galleries
-                "private_gallery_id_hash": str,# Hash of private gallery ID
+                "requires_login": bool,        # Whether login gate is enabled
+                "storage_token_label": str,    # Token label/version marker
+                "salt_b64": str,               # Placeholder until v1 KDF is implemented
+                "storage_token_hash_hex": str, # Temporary verifier hash for gate checks
                 "unlisted": bool,             # Whether gallery is hidden from listings
                 "cover": dict | None          # Cover image metadata or None
             }
@@ -169,14 +172,18 @@ def process_gallery(gallery_path: str) -> dict:
     # Process Security data
     
     if password:
-        # Generate private gallery ID for password-protected galleries
-        private_gallery_id = hashlib.sha256(f"{gallery_id}:{password}".encode('utf-8')).hexdigest()[:16]
-        private_gallery_id_hash = hashlib.sha256(private_gallery_id.encode('utf-8')).hexdigest()
-        gallery_data['private_gallery_id'] = private_gallery_id
-        gallery_data['private_gallery_id_hash'] = private_gallery_id_hash
+        # Temporary verifier until v1 HKDF/token derivation lands.
+        legacy_storage_token = hashlib.sha256(f"{gallery_id}:{password}".encode('utf-8')).hexdigest()[:16]
+        storage_token_hash_hex = hashlib.sha256(legacy_storage_token.encode('utf-8')).hexdigest()
+        gallery_data['requires_login'] = True
+        gallery_data['storage_token_label'] = STORAGE_TOKEN_LABEL
+        gallery_data['salt_b64'] = ''
+        gallery_data['storage_token_hash_hex'] = storage_token_hash_hex
     else:
-        gallery_data['private_gallery_id'] = ''
-        gallery_data['private_gallery_id_hash'] = ''
+        gallery_data['requires_login'] = False
+        gallery_data['storage_token_label'] = ''
+        gallery_data['salt_b64'] = ''
+        gallery_data['storage_token_hash_hex'] = ''
 
     # Handle unlisted galleries - encrypted galleries are always unlisted
     gallery_data['unlisted'] = is_encrypted or gallery_config.get('unlisted', False)

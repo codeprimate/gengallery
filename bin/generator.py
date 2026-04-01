@@ -164,18 +164,18 @@ def get_gallery_config(gallery):
         dict: Configuration including output filename and template types
     """
     is_encrypted = gallery.get('encrypted', False)
-    has_password = bool(gallery.get('private_gallery_id', ''))
+    requires_login = bool(gallery.get('requires_login', False))
     
     if is_encrypted:
         return {
-            'output_filename': f"{gallery['private_gallery_id']}.html",
+            'output_filename': 'gallery.html',
             'needs_login': True,
             'gallery_template': 'encrypted_gallery',
             'image_template': 'encrypted_image'
         }
-    elif has_password:
+    elif requires_login:
         return {
-            'output_filename': f"{gallery['private_gallery_id']}.html",
+            'output_filename': 'gallery.html',
             'needs_login': True,
             'gallery_template': 'gallery',
             'image_template': 'image'
@@ -275,7 +275,7 @@ def generate_gallery_pages(config, galleries_data, output_path, progress=None, t
                 status_icons.append("[yellow]⭐[/]")
             if gallery.get('unlisted', False):
                 status_icons.append("[yellow]🕶[/]")
-            if gallery.get('private_gallery_id', ''):
+            if gallery.get('requires_login', False):
                 status_icons.append("[red]🔑[/]")
             if gallery.get('encrypted', False):
                 status_icons.append("[red]🔒[/]")
@@ -425,7 +425,7 @@ def main():
                 status_icons.append("[yellow]⭐[/]")
             if gallery.get('unlisted', False):
                 status_icons.append("[yellow]🕶[/]")
-            if gallery.get('private_gallery_id', ''):
+            if gallery.get('requires_login', False):
                 status_icons.append("[red]🔑[/]")
             if gallery.get('encrypted', False):
                 status_icons.append("[red]🔒[/]")
@@ -474,7 +474,7 @@ def main():
         console.print(f"[green]✓[/green] [dim]Completed in {stage_times['finalize'].total_seconds():.1f}s[/dim]")
 
         # Add password summary section
-        protected_galleries = [g for g in galleries_data['galleries'] if g.get('private_gallery_id')]
+        protected_galleries = [g for g in galleries_data['galleries'] if g.get('requires_login', False)]
         console.print(f"\n[bold blue]Password Protected Galleries ({len(protected_galleries)}):[/bold blue]")
         if protected_galleries:
             for gallery in protected_galleries:

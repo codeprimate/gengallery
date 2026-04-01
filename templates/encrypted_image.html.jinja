@@ -22,7 +22,7 @@
 
     <main class="container mx-auto px-4 py-8">
         <nav class="mb-4">
-            <a href="/galleries/{{ gallery.id }}/{{ gallery.private_gallery_id }}.html" class="text-blue-500 hover:underline">&larr; Back to {{ gallery.title }}</a>
+            <a href="/galleries/{{ gallery.id }}/gallery.html" class="text-blue-500 hover:underline">&larr; Back to {{ gallery.title }}</a>
         </nav>
 
         <div class="bg-white rounded-lg shadow-md overflow-hidden relative">
@@ -83,7 +83,7 @@
     <script src="/js/site.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            new EncryptedGallery('{{ gallery.id }}', '{{ gallery.private_gallery_id }}', {
+            new EncryptedGallery('{{ gallery.id }}', {
                 limits: {
                     full: 1,
                     thumbnail: 0

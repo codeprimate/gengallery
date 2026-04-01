@@ -168,8 +168,8 @@
     <script src="/js/site.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            // Initialize encryption handler with gallery ID and private gallery ID
-            new EncryptedGallery('{{ gallery.id }}', '{{ gallery.private_gallery_id }}', {
+            // Initialize encryption handler with gallery ID.
+            new EncryptedGallery('{{ gallery.id }}', {
                 limits: {
                     full: 1,      // Only decrypt one full-size image at a time
                     cover: 3,     // Allow up to 3 cover images to be decrypted
@@ -181,7 +181,7 @@
             });
 
             // Initialize gallery lock functionality
-            new GalleryLock('{{ gallery.id }}', '{{ gallery.private_gallery_id }}');
+            new GalleryLock('{{ gallery.id }}');
         });
     </script>
 </body>

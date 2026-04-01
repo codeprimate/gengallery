@@ -67,7 +67,7 @@
     <script src="/js/site.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
-            new GalleryLogin('{{ gallery.id }}', '{{ gallery.private_gallery_id_hash }}');
+            new GalleryLogin('{{ gallery.id }}', '{{ gallery.storage_token_hash_hex }}');
         });
     </script>
 </body>

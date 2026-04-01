@@ -1,14 +1,17 @@
 /**
  * Handles gallery login functionality and password verification.
  */
+const STORAGE_TOKEN_PREFIX = 'pge.v1.storage_token.';
+const PROTECTED_GALLERY_PAGE = 'gallery.html';
+
 class GalleryLogin {
     /**
      * @param {string} galleryId - Unique identifier for the gallery
-     * @param {string} privateGalleryIdHash - Hash of the private gallery ID for verification
+     * @param {string} storageTokenHashHex - Hash of the storage token for verification
      */
-    constructor(galleryId, privateGalleryIdHash) {
+    constructor(galleryId, storageTokenHashHex) {
         this.galleryId = galleryId;
-        this.privateGalleryIdHash = privateGalleryIdHash;
+        this.storageTokenHashHex = storageTokenHashHex;
         this.loadingState = document.getElementById('loadingState');
         this.loginForm = document.getElementById('loginForm');
         this.passwordInput = document.getElementById('password');
@@ -51,11 +54,11 @@ class GalleryLogin {
     }
 
     /**
-     * Generates a private gallery ID by hashing the gallery ID and password.
+     * Derives a candidate storage token from the gallery ID and password.
      * @param {string} password - User provided password
      * @returns {Promise<string>} Truncated hash string (16 characters)
      */
-    async generatePrivateGalleryId(password) {
+    async deriveCandidateStorageToken(password) {
         const hashHex = await this.hashString(`${this.galleryId}:${password}`);
         return hashHex.slice(0, 16); // Truncate to 16 characters
     }
@@ -69,28 +72,27 @@ class GalleryLogin {
     }
 
     /**
-     * Redirects to the gallery page with the provided ID and current hash.
-     * @param {string} privateGalleryId - Private gallery identifier
+     * Redirects to the gallery page and preserves hash fragment.
      */
-    redirectToGallery(privateGalleryId) {
+    redirectToGallery() {
         const hash = this.getHashFromUrl();
-        window.location.href = `./${privateGalleryId}.html${hash}`;
+        window.location.href = `./${PROTECTED_GALLERY_PAGE}${hash}`;
     }
 
     /**
-     * Saves the private gallery ID to local storage.
-     * @param {string} privateGalleryId - Private gallery identifier to save
+     * Saves the storage token to local storage.
+     * @param {string} storageToken - Storage token to save
      */
-    savePrivateGalleryId(privateGalleryId) {
-        localStorage.setItem(`gallery_${this.galleryId}_private_id`, privateGalleryId);
+    saveStorageToken(storageToken) {
+        localStorage.setItem(`${STORAGE_TOKEN_PREFIX}${this.galleryId}`, storageToken);
     }
 
     /**
-     * Retrieves the saved private gallery ID from local storage.
-     * @returns {string|null} Saved private gallery ID or null if not found
+     * Retrieves the saved storage token from local storage.
+     * @returns {string|null} Saved storage token or null if not found
      */
-    getSavedPrivateGalleryId() {
-        return localStorage.getItem(`gallery_${this.galleryId}_private_id`);
+    getSavedStorageToken() {
+        return localStorage.getItem(`${STORAGE_TOKEN_PREFIX}${this.galleryId}`);
     }
 
     /**
@@ -98,11 +100,11 @@ class GalleryLogin {
      * @returns {Promise<boolean>} True if valid credentials exist
      */
     async checkSavedCredentials() {
-        const savedPrivateGalleryId = this.getSavedPrivateGalleryId();
-        if (savedPrivateGalleryId) {
-            const savedPrivateGalleryIdHash = await this.hashString(savedPrivateGalleryId);
-            if (savedPrivateGalleryIdHash === this.privateGalleryIdHash) {
-                this.redirectToGallery(savedPrivateGalleryId);
+        const savedStorageToken = this.getSavedStorageToken();
+        if (savedStorageToken) {
+            const savedStorageTokenHash = await this.hashString(savedStorageToken);
+            if (savedStorageTokenHash === this.storageTokenHashHex) {
+                this.redirectToGallery();
                 return true;
             }
         }
@@ -119,12 +121,12 @@ class GalleryLogin {
         const password = this.passwordInput.value;
 
         try {
-            const assertedPrivateGalleryId = await this.generatePrivateGalleryId(password);
-            const assertedPrivateGalleryIdHash = await this.hashString(assertedPrivateGalleryId);
+            const assertedStorageToken = await this.deriveCandidateStorageToken(password);
+            const assertedStorageTokenHash = await this.hashString(assertedStorageToken);
 
-            if (assertedPrivateGalleryIdHash === this.privateGalleryIdHash) {
-                this.savePrivateGalleryId(assertedPrivateGalleryId);
-                this.redirectToGallery(assertedPrivateGalleryId);
+            if (assertedStorageTokenHash === this.storageTokenHashHex) {
+                this.saveStorageToken(assertedStorageToken);
+                this.redirectToGallery();
             } else {
                 this.errorMessage.textContent = 'Incorrect password. Please try again.';
                 this.passwordInput.value = '';
@@ -144,11 +146,9 @@ class GalleryLogin {
 class GalleryLock {
     /**
      * @param {string} galleryId - Unique identifier for the gallery
-     * @param {string} privateGalleryId - Private ID for the gallery
      */
-    constructor(galleryId, privateGalleryId) {
+    constructor(galleryId) {
         this.galleryId = galleryId;
-        this.privateGalleryId = privateGalleryId;
         this.lockIcon = document.getElementById('lockIcon');
         this.openLock = this.lockIcon.querySelector('.open-lock');
         this.closedLock = this.lockIcon.querySelector('.closed-lock');
@@ -198,11 +198,9 @@ class GalleryLock {
         }
 
         // Clear all sensitive data from localStorage
-        localStorage.removeItem(`gallery_${this.galleryId}_private_id`);
+        localStorage.removeItem(`${STORAGE_TOKEN_PREFIX}${this.galleryId}`);
 
         // Clear any sensitive data from memory
-        this.privateGalleryId = null;
-        
         // Force garbage collection hints on sensitive data
         if (window.gc) {
             window.gc();
@@ -219,12 +217,11 @@ class GalleryLock {
 class EncryptedGallery {
     /**
      * @param {string} galleryId - Unique identifier for the gallery
-     * @param {string} privateGalleryId - Private gallery ID to use as encryption key
      * @param {Object} [options] - Configuration options
      */
-    constructor(galleryId, privateGalleryId, options = {}) {
+    constructor(galleryId, options = {}) {
         this.galleryId = galleryId;
-        this.privateGalleryId = privateGalleryId;
+        this.storageToken = localStorage.getItem(`${STORAGE_TOKEN_PREFIX}${this.galleryId}`);
         this.options = {
             placeholderSelector: options.placeholderSelector || '#encrypted-placeholder',
             imageSelector: options.imageSelector || '.encrypted-image',
@@ -462,11 +459,14 @@ class EncryptedGallery {
         
         const encryptedData = await response.arrayBuffer();
         const imageId = url.split('/').pop().split('.')[0];
+        if (!this.storageToken) {
+            throw new Error('Missing storage token');
+        }
         
         const { key, iv } = await deriveEncryptionParams(
             this.galleryId, 
             imageId, 
-            this.privateGalleryId
+            this.storageToken
         );
         
         const decrypted = await crypto.subtle.decrypt(
@@ -493,7 +493,7 @@ class EncryptedGallery {
         this.failedImages.clear();
 
         // Clear sensitive data
-        this.privateGalleryId = null;
+        this.storageToken = null;
         
         // Remove references to DOM elements
         this.options = null;
@@ -563,16 +563,16 @@ class EncryptedGallery {
  * Derives encryption parameters for decrypting gallery images.
  * @param {string} galleryId - Gallery ID
  * @param {string} imageId - Image ID 
- * @param {string} privateGalleryId - Private gallery ID to use as encryption key
+ * @param {string} storageToken - Storage token used as key material
  * @returns {Promise<{key: CryptoKey, iv: Uint8Array}>}
  */
-async function deriveEncryptionParams(galleryId, imageId, privateGalleryId) {
+async function deriveEncryptionParams(galleryId, imageId, storageToken) {
     const encoder = new TextEncoder();
     
     // Hash the private gallery ID to get a consistent key length
     const keyBuffer = await crypto.subtle.digest(
         'SHA-256',
-        encoder.encode(privateGalleryId)
+        encoder.encode(storageToken)
     );
     
     // Get IV from image ID hash (matching Python)
