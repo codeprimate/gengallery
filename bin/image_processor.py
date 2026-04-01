@@ -466,6 +466,20 @@ def create_metadata_dict(image_path: str, image_id: str, gallery_id: str,
         metadata["metadata_path"] = f"/galleries/{gallery_id}/{METADATA_VARIANT_DIR}/{image_id}{METADATA_BLOB_EXTENSION}"
     return metadata
 
+def create_public_metadata_dict(output_metadata: dict, is_encrypted: bool) -> dict:
+    """Build metadata payload written to plaintext export metadata JSON."""
+    if not is_encrypted:
+        return output_metadata
+
+    return {
+        "id": output_metadata["id"],
+        "url": output_metadata["url"],
+        "path": output_metadata["path"],
+        "thumbnail_path": output_metadata["thumbnail_path"],
+        "cover_path": output_metadata["cover_path"],
+        "metadata_path": output_metadata.get("metadata_path", "")
+    }
+
 def create_inner_metadata_dict(output_metadata: dict) -> dict:
     """Create inner metadata JSON schema for encrypted metadata blob."""
     return {
@@ -563,7 +577,14 @@ def process_image(image_path: str, gallery_id: str, gallery_config: dict, progre
         # Return existing metadata
         metadata_path = os.path.join(config['output_path'], 'metadata', gallery_id, f"{image_id}.json")
         with open(metadata_path, 'r') as f:
-            return json.load(f)
+            existing_metadata = json.load(f)
+        if is_encrypted:
+            public_metadata = create_public_metadata_dict(existing_metadata, True)
+            if existing_metadata != public_metadata:
+                with open(metadata_path, 'w') as metadata_file:
+                    json.dump(public_metadata, metadata_file, indent=2)
+            return public_metadata
+        return existing_metadata
 
     if progress:
         task = progress.add_task(
@@ -595,7 +616,7 @@ def process_image(image_path: str, gallery_id: str, gallery_config: dict, progre
         os.makedirs(metadata_dir, exist_ok=True)
         metadata_path = os.path.join(metadata_dir, f"{image_id}.json")
         with open(metadata_path, 'w') as f:
-            json.dump(output_metadata, f, indent=2)
+            json.dump(create_public_metadata_dict(output_metadata, is_encrypted), f, indent=2)
 
         if progress:
             progress.update(task, completed=100)

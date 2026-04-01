@@ -16,6 +16,7 @@ const DIAGNOSTIC_SUPPRESSION_NOTICE = 'Further runtime diagnostics suppressed';
 const PROTECTED_GALLERY_PAGE = 'gallery.html';
 const STORAGE_TOKEN_INFO_PREFIX = 'pge/v1/storage_token:';
 const IMAGE_KEY_INFO = 'pge/v1/key:image';
+const METADATA_KEY_INFO = 'pge/v1/key:metadata';
 const DERIVED_KEY_LENGTH_BYTES = 32;
 const MAX_LOGIN_DIAGNOSTIC_LOGS = 3;
 
@@ -108,6 +109,11 @@ async function deriveStorageTokenBytes(password, galleryId) {
 async function deriveImageKeyBytes(storageTokenBytes, galleryId) {
     const saltBytes = utf8Bytes(galleryId);
     return hkdfSha256(storageTokenBytes, saltBytes, utf8Bytes(IMAGE_KEY_INFO), DERIVED_KEY_LENGTH_BYTES);
+}
+
+async function deriveMetadataKeyBytes(storageTokenBytes, galleryId) {
+    const saltBytes = utf8Bytes(galleryId);
+    return hkdfSha256(storageTokenBytes, saltBytes, utf8Bytes(METADATA_KEY_INFO), DERIVED_KEY_LENGTH_BYTES);
 }
 
 class GalleryLogin {
@@ -501,6 +507,8 @@ class EncryptedGallery {
         this.failedImages = new Set();
         this.errorLogCount = 0;
         this.maxErrorLogs = 5;
+        this.metadataCache = new Map();
+        this.metadataKeyPromise = null;
 
         if (this.options.mode === 'single') {
             this.decryptSingleImage();
@@ -540,6 +548,7 @@ class EncryptedGallery {
             
             const objectUrl = this.objectUrlCache.set(url, decryptedBlob);
             mainImage.src = objectUrl;
+            await this.hydrateMetadataForImage(mainImage);
             if (overlay) overlay.style.display = 'none';
 
             await this.decryptNavigationThumbnails();
@@ -652,6 +661,7 @@ class EncryptedGallery {
             
             img.src = objectUrl;
             img.srcset = '';
+            await this.hydrateMetadataForImage(img);
             
             if (overlay) overlay.style.display = 'none';
 
@@ -719,6 +729,94 @@ class EncryptedGallery {
         });
     }
 
+    async getMetadataKey() {
+        if (!this.storageToken) {
+            throw new Error('ERR_BAD_PASSWORD_OR_TOKEN');
+        }
+        if (!this.metadataKeyPromise) {
+            this.metadataKeyPromise = (async () => {
+                const storageTokenBytes = base64urlToBytes(this.storageToken);
+                const metadataKeyBytes = await deriveMetadataKeyBytes(storageTokenBytes, this.galleryId);
+                return crypto.subtle.importKey(
+                    'raw',
+                    metadataKeyBytes,
+                    { name: 'AES-GCM' },
+                    false,
+                    ['decrypt']
+                );
+            })();
+        }
+        return this.metadataKeyPromise;
+    }
+
+    async fetchAndDecryptMetadata(metadataUrl) {
+        if (!metadataUrl) return null;
+        if (this.metadataCache.has(metadataUrl)) {
+            return this.metadataCache.get(metadataUrl);
+        }
+
+        const response = await fetch(metadataUrl);
+        if (!response.ok) throw new Error('ERR_MANIFEST_INVALID');
+        const encryptedData = await response.arrayBuffer();
+        const envelope = EnvelopeV1.parse(encryptedData);
+        const metadataKey = await this.getMetadataKey();
+
+        let decrypted;
+        try {
+            decrypted = await crypto.subtle.decrypt(
+                { name: 'AES-GCM', iv: envelope.nonce },
+                metadataKey,
+                envelope.ciphertextWithTag
+            );
+        } catch (error) {
+            throw new Error('ERR_DECRYPT_AUTH_FAILED');
+        }
+
+        const metadata = JSON.parse(new TextDecoder().decode(decrypted));
+        this.metadataCache.set(metadataUrl, metadata);
+        return metadata;
+    }
+
+    resolveMetadataField(metadata, fieldName) {
+        if (!metadata || !fieldName) return '';
+        if (fieldName === 'DateTimeOriginal') {
+            return metadata.exif && metadata.exif.DateTimeOriginal ? metadata.exif.DateTimeOriginal : '';
+        }
+        const value = metadata[fieldName];
+        return typeof value === 'string' ? value : '';
+    }
+
+    applyMetadataToScope(scope, metadata) {
+        const fields = scope.querySelectorAll('.encrypted-meta-field');
+        for (const fieldElement of fields) {
+            const fieldName = fieldElement.dataset.field || '';
+            const fallback = fieldElement.dataset.fallback || '';
+            const value = this.resolveMetadataField(metadata, fieldName);
+            fieldElement.textContent = value || fallback;
+        }
+    }
+
+    async hydrateMetadataForImage(img) {
+        const metadataUrl = img.dataset.encryptedMetadataUrl;
+        if (!metadataUrl) return;
+
+        try {
+            const metadata = await this.fetchAndDecryptMetadata(metadataUrl);
+            const scopes = document.querySelectorAll('[data-encrypted-metadata-url]');
+            for (const scope of scopes) {
+                if (scope.getAttribute('data-encrypted-metadata-url') === metadataUrl) {
+                    this.applyMetadataToScope(scope, metadata);
+                }
+            }
+
+            if (metadata && metadata.filename && document.title.startsWith('Private Image')) {
+                document.title = `${metadata.filename} - Private Gallery`;
+            }
+        } catch (error) {
+            this.logError('ERR_METADATA_DECRYPT', { galleryId: this.galleryId, assetUrl: metadataUrl });
+        }
+    }
+
     /**
      * Performs cleanup by revoking object URLs and clearing sensitive data.
      */
@@ -729,6 +827,8 @@ class EncryptedGallery {
 
         // Clear sensitive data
         this.storageToken = null;
+        this.metadataCache.clear();
+        this.metadataKeyPromise = null;
         
         // Remove references to DOM elements
         this.options = null;

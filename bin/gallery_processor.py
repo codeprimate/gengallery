@@ -78,7 +78,12 @@ def cleanup_missing_image(gallery_id: str, image_metadata: dict, source_path: st
     Returns:
         bool: True if image was missing and cleaned up, False otherwise
     """
-    if os.path.exists(os.path.join(source_path, image_metadata['filename'])):
+    filename = image_metadata.get('filename', '')
+    if not filename:
+        # Encrypted gallery metadata intentionally omits source filename.
+        return False
+
+    if os.path.exists(os.path.join(source_path, filename)):
         return False
         
     # Remove metadata file
@@ -311,33 +316,47 @@ def process_gallery(gallery_path: str) -> dict:
         cover_basename = os.path.splitext(cover_image_filename)[0]
         cover_image = next(
             (img for img in gallery_data['images'] 
-             if os.path.splitext(img['filename'])[0] == cover_basename),
+             if img.get('filename') and os.path.splitext(img['filename'])[0] == cover_basename),
             None
         )
         if cover_image:
-            gallery_data['cover'] = {
-                "id": cover_image['id'],
-                "filename": cover_image['filename'],
-                "title": cover_image.get('title', ''),
-                "caption": cover_image.get('caption', ''),
-                "path": cover_image['cover_path'],
-                "thumbnail_path": cover_image['thumbnail_path'],
-            }
+            if is_encrypted:
+                gallery_data['cover'] = {
+                    "id": cover_image['id'],
+                    "path": cover_image['cover_path'],
+                    "thumbnail_path": cover_image['thumbnail_path'],
+                }
+            else:
+                gallery_data['cover'] = {
+                    "id": cover_image['id'],
+                    "filename": cover_image.get('filename', ''),
+                    "title": cover_image.get('title', ''),
+                    "caption": cover_image.get('caption', ''),
+                    "path": cover_image['cover_path'],
+                    "thumbnail_path": cover_image['thumbnail_path'],
+                }
     
     # Fallback to first image if we have images but no valid cover
     if not gallery_data['cover'] and gallery_data['images']:
         first_image = gallery_data['images'][0]
-        gallery_data['cover'] = {
-            "id": first_image['id'],
-            "filename": first_image['filename'],
-            "title": first_image.get('title', ''),
-            "caption": first_image.get('caption', ''),
-            "path": first_image['cover_path'],
-            "thumbnail_path": first_image['thumbnail_path'],
-        }
+        if is_encrypted:
+            gallery_data['cover'] = {
+                "id": first_image['id'],
+                "path": first_image['cover_path'],
+                "thumbnail_path": first_image['thumbnail_path'],
+            }
+        else:
+            gallery_data['cover'] = {
+                "id": first_image['id'],
+                "filename": first_image.get('filename', ''),
+                "title": first_image.get('title', ''),
+                "caption": first_image.get('caption', ''),
+                "path": first_image['cover_path'],
+                "thumbnail_path": first_image['thumbnail_path'],
+            }
 
     # Sort images by date taken if available
-    gallery_data['images'].sort(key=lambda x: x['exif'].get('DateTimeOriginal', ''), reverse=True)
+    gallery_data['images'].sort(key=lambda x: x.get('exif', {}).get('DateTimeOriginal', ''), reverse=True)
 
     if is_encrypted:
         gallery_data['manifest_path'] = write_manifest_file(gallery_data)

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ image.title }} - {{ gallery.title }} - {{ site_name }}</title>
+    <title>Private Image - {{ site_name }}</title>
     <link href="/css/tailwind.css" rel="stylesheet">
     <link href="/css/site.css" rel="stylesheet">
     <link rel="icon" type="image/x-icon" href="/favicon.ico">
@@ -23,7 +23,7 @@
 
     <main class="container mx-auto px-4 py-8">
         <nav class="mb-4">
-            <a href="/galleries/{{ gallery.id }}/gallery.html" class="text-blue-500 hover:underline">&larr; Back to {{ gallery.title }}</a>
+            <a href="/galleries/{{ gallery.id }}/index.html" class="text-blue-500 hover:underline">&larr; Back to {{ gallery.title }}</a>
         </nav>
 
         <div class="bg-white rounded-lg shadow-md overflow-hidden relative">
@@ -41,6 +41,7 @@
                         <img class="encrypted-image max-h-[70vh] object-contain" 
                              src="#encrypted-placeholder"
                              data-encrypted-url="{{ image.cover_path }}"
+                             data-encrypted-metadata-url="{{ image.metadata_path }}"
                              data-full-url="{{ image.path }}"
                              data-encrypted-type="cover"
                              data-content-type="image/jpeg"
@@ -64,6 +65,25 @@
                 {% endif %}
             </div>
         </div>
+
+        <section class="mt-6 bg-white rounded-lg shadow-md p-4" data-encrypted-metadata-url="{{ image.metadata_path }}">
+            <p class="text-sm text-gray-600">
+                Filename:
+                <span class="encrypted-meta-field font-medium text-gray-800" data-field="filename" data-fallback=""></span>
+            </p>
+            <p class="text-sm text-gray-600 mt-1">
+                Title:
+                <span class="encrypted-meta-field font-medium text-gray-800" data-field="title" data-fallback="Encrypted image">Encrypted image</span>
+            </p>
+            <p class="text-sm text-gray-600 mt-1">
+                Date:
+                <span class="encrypted-meta-field font-medium text-gray-800" data-field="DateTimeOriginal" data-fallback=""></span>
+            </p>
+            <p class="text-sm text-gray-600 mt-1">
+                Caption:
+                <span class="encrypted-meta-field font-medium text-gray-800" data-field="caption" data-fallback=""></span>
+            </p>
+        </section>
 
         <!-- SVG Placeholders (hidden) -->
         <div hidden>

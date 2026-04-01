@@ -97,13 +97,14 @@
         <!-- Image Thumbnails -->
         <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             {% for image in gallery.images %}
-            <div id="{{ image.id }}" class="bg-white rounded-lg shadow-md overflow-hidden">
+            <div id="{{ image.id }}" class="bg-white rounded-lg shadow-md overflow-hidden" data-encrypted-metadata-url="{{ image.metadata_path }}">
                 <a href="{{ image.url }}" class="block relative">
                     <img class="encrypted-image w-full h-48 object-cover" 
                          src="#encrypted-placeholder"
                          data-encrypted-url="{{ image.thumbnail_path }}"
+                         data-encrypted-metadata-url="{{ image.metadata_path }}"
                          data-encrypted-type="thumbnail"
-                         alt="{{ image.title }}">
+                         alt="Encrypted Image">
                     
                     <div class="encrypted-overlay absolute inset-0 bg-gray-100 bg-opacity-75 flex items-center justify-center">
                         <svg class="animate-spin h-8 w-8 text-gray-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -114,14 +115,19 @@
                 </a>
                 <div class="p-4">
                     <h3 class="text-lg font-semibold text-gray-800">
-                        <a href="{{ image.url }}" class="hover:underline">{{ image.title }}</a>
+                        <a href="{{ image.url }}" class="hover:underline">
+                            <span class="encrypted-meta-field" data-field="title" data-fallback="Encrypted image">Encrypted image</span>
+                        </a>
                     </h3>
-                    {% if image.caption %}
-                    <blockquote class="text-md leading-tight">{{ image.caption }}</blockquote>
-                    {% endif %}
+                    <p class="text-xs text-gray-500 mt-1">
+                        <span class="encrypted-meta-field" data-field="filename" data-fallback=""> </span>
+                    </p>
+                    <blockquote class="text-md leading-tight mt-1">
+                        <span class="encrypted-meta-field" data-field="caption" data-fallback=""></span>
+                    </blockquote>
                     <div class="flex w-full items-center">
                         <div class="w-3/4 text-left text-sm">
-                            <span class="text-gray-500">{{ image.exif.DateTimeOriginal if image.exif and image.exif.DateTimeOriginal else '' }}</span>
+                            <span class="text-gray-500 encrypted-meta-field" data-field="DateTimeOriginal" data-fallback=""></span>
                         </div>
                         <div class="w-1/4 text-right">
                             <a href="#" class="hover:underline full-image-link">
