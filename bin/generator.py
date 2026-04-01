@@ -19,6 +19,7 @@ console = Console()
 PROTECTED_PAGE_HASH_LENGTH = 16
 PROTECTED_PAGE_EXTENSION = '.html'
 LEGACY_PROTECTED_PAGE_FILENAME = 'gallery.html'
+LISTING_FEATURED_TAG = 'featured'
 
 def load_config():
     """Load and parse the YAML configuration file.
@@ -85,9 +86,17 @@ def generate_gallery_listing_pages(config, galleries_data, output_path, env, pro
 
     # First pass - collect tags and galleries
     for gallery in galleries_data['galleries']:
+        if gallery.get('unlisted', False):
+            continue
         is_encrypted = gallery.get('encrypted', False)
-        is_unlisted = gallery.get('unlisted', False)
-        if is_encrypted or is_unlisted:
+        if is_encrypted:
+            tags = gallery.get('tags', [])
+            if LISTING_FEATURED_TAG not in tags:
+                continue
+            featured_list = tag_galleries.setdefault(LISTING_FEATURED_TAG, [])
+            if any(g.get('id') == gallery.get('id') for g in featured_list):
+                continue
+            featured_list.append(gallery)
             continue
         for tag in gallery['tags']:
             all_tags.add(tag)
@@ -133,7 +142,7 @@ def generate_gallery_listing_pages(config, galleries_data, output_path, env, pro
             f.write(rendered_html)
 
         # Copy the 'featured' page to index.html
-        if tag == 'featured':
+        if tag == LISTING_FEATURED_TAG:
             index_file = os.path.join(output_path, 'public_html', 'index.html')
             shutil.copy2(output_file, index_file)
 
@@ -309,7 +318,7 @@ def generate_gallery_pages(config, galleries_data, output_path, progress=None, t
         else:
             # Build status icons
             status_icons = []
-            if 'featured' in gallery.get('tags', []):
+            if LISTING_FEATURED_TAG in gallery.get('tags', []):
                 status_icons.append("[yellow]⭐[/]")
             if gallery.get('unlisted', False):
                 status_icons.append("[yellow]🕶[/]")
@@ -398,13 +407,15 @@ def copy_static_files(config, output_path, quiet=False, progress=None, task=None
     # Create directories if they don't exist
     os.makedirs(os.path.join(output_path, 'public_html', 'css'), exist_ok=True)
     os.makedirs(os.path.join(output_path, 'public_html', 'js'), exist_ok=True)
+    os.makedirs(os.path.join(output_path, 'public_html', 'images'), exist_ok=True)
 
     files_to_copy = [
         ('templates/site.css', 'public_html/css/site.css'),
         ('templates/site.js', 'public_html/js/site.js'),
         ('templates/tailwind/tailwind.css', 'public_html/css/tailwind.css'),
         ('templates/favicon.ico', 'public_html/favicon.ico'),
-        ('templates/robots.txt', 'public_html/robots.txt')
+        ('templates/robots.txt', 'public_html/robots.txt'),
+        ('templates/images/encrypted-listing-cover.svg', 'public_html/images/encrypted-listing-cover.svg'),
     ]
 
     for src_rel, dest_rel in files_to_copy:
@@ -462,7 +473,7 @@ def main():
         for gallery in galleries_data['galleries']:
             num_images = len(gallery['images'])
             status_icons = []
-            if 'featured' in gallery.get('tags', []):
+            if LISTING_FEATURED_TAG in gallery.get('tags', []):
                 status_icons.append("[yellow]⭐[/]")
             if gallery.get('unlisted', False):
                 status_icons.append("[yellow]🕶[/]")

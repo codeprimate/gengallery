@@ -85,7 +85,7 @@ Each gallery should have a `gallery.yaml` file with the following options:
 - `cover`: Filename of the cover image (optional, first image used if not specified)
 - `encrypted`: Enable encryption for private galleries (optional)
 - `password`: Password protection for the gallery (optional)
-- `unlisted`: Set to true to hide from listings (optional)
+- `unlisted`: Set to true to hide from listings (optional). For encrypted galleries, omitting this key (or setting true) keeps the gallery unlisted; set to **false** explicitly if you want a featured encrypted gallery on the home page.
 
 ## Gallery Types and Security
 
@@ -99,11 +99,11 @@ The system supports several types of galleries with different visibility and sec
    ```
    - Uses AES-CBC encryption with client-side decryption
    - All images are encrypted before transfer to server
-   - Always unlisted and never featured (featured tag ignored)
+   - **Default:** unlisted (hidden from the home page and tag listings). To show on the home page, add the `featured` tag and set `unlisted: false` explicitly in YAML.
+   - On listings, encrypted galleries use a lock placeholder image (no cover preview), no description, and no tag links; other tags in YAML do not create tag pages or Browse entries.
    - Requires password authentication
    - Server administrators cannot view image content, but HTML is clear text
    - Images decrypted in browser
-   - Gallery is unlisted and tags are not indexed
 
 2. **Password Protected Galleries**
    ```yaml
@@ -139,8 +139,7 @@ The system supports several types of galleries with different visibility and sec
 **Additional Security Notes:**
 - All gallery and image URLs use SHA-256 hashes for added obscurity
 - Password-protected galleries show a login page before redirecting to the hashed URL
-- Security settings can be combined (except for encrypted galleries which override other settings)
-- Featured status is ignored for encrypted galleries
+- Encrypted galleries default to unlisted; listing visibility is opt-in via explicit `unlisted: false` plus the `featured` tag
 
 ## Image Metadata
 

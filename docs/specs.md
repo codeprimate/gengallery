@@ -121,7 +121,7 @@ password: ""     # Optional: for password protection
 
 ## Featured Galleries
 
-Galleries can be marked as featured by adding the `featured` tag to the gallery's tags list. Featured galleries are displayed prominently on the home page in a dedicated section while still respecting `unlisted` and `encrypted` settings.
+Galleries can be marked as featured by adding the `featured` tag to the gallery's tags list. Featured galleries are displayed prominently on the home page in a dedicated section while still respecting `unlisted` and `encrypted` settings. For **encrypted** galleries, you must also set `unlisted: false` explicitly in YAML to appear there; only the featured aggregate page (home) includes them, and listing cards omit description, tag links, and real cover images (lock placeholder).
 
 Example featured gallery configuration:
 ```yaml
@@ -375,17 +375,27 @@ Galleries support several visibility and security options:
    - Uses client-side AES-CBC encryption with PBKDF2 key derivation
    - All images and metadata encrypted
    - Requires password for client-side decryption
-   - Automatically unlisted (hidden from all listings)
+   - **Default:** unlisted (hidden from home and tag listings). Optional home presence: `featured` tag plus explicit `unlisted: false`
+   - YAML tags on encrypted galleries do not populate per-tag listing pages or the Browse tag cloud; only the shared featured list (home) can include listed encrypted galleries
    - No server-side decryption capability
    - Deterministic IV generation for reproducible encryption
    - Blocked from search engine indexing
-   - Example:
+   - Example (private):
    ```yaml
    title: "Private Collection"
    encrypted: true
    password: "secret123"
    tags:
      - private
+   ```
+   - Example (featured on home):
+   ```yaml
+   title: "Teaser — unlock to view"
+   encrypted: true
+   password: "secret123"
+   unlisted: false
+   tags:
+     - featured
    ```
 
 ### Security Implementation
@@ -425,7 +435,8 @@ Galleries support several visibility and security options:
    - Search indexing: Login page only
 
 5. **Encrypted**
-   - Always unlisted
-   - Listed in: Nothing
+   - Default: unlisted (not on home or tag pages)
+   - Listed in: Home page only when `unlisted: false` and `featured` tag present (reduced listing card: lock image, title, date, counts; no description or tag pills)
+   - Per-tag pages / Browse: encrypted YAML tags are not indexed
    - Accessible: With password for decryption
    - Search indexing: Blocked

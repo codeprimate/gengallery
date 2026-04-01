@@ -48,6 +48,22 @@ MANIFEST_KDF = 'hkdf-sha256-v1'
 MANIFEST_SALT_SOURCE = 'gallery_id_utf8'
 MANIFEST_VARIANT_FORMAT_VERSION = 1
 
+
+def resolve_unlisted(is_encrypted: bool, gallery_config: dict) -> bool:
+    """
+    Whether this gallery is excluded from public tag/home listings.
+
+    Encrypted galleries default to unlisted; only an explicit ``unlisted: false``
+    in YAML lists them (for use with featured encrypted galleries).
+    Non-encrypted galleries use the same unlisted semantics as plain YAML boolean.
+    """
+    if is_encrypted:
+        if 'unlisted' in gallery_config and gallery_config['unlisted'] is False:
+            return False
+        return True
+    return bool(gallery_config.get('unlisted', False))
+
+
 def generate_image_id(image_path: str, gallery_id: str) -> str:
     """
     Generate a unique ID for an image based on its path and gallery ID.
@@ -212,7 +228,7 @@ def process_gallery(gallery_path: str) -> dict:
                 "salt_b64": str,               # Placeholder until v1 KDF is implemented
                 "storage_token_hash_hex": str, # Temporary verifier hash for gate checks
                 "manifest_path": str,         # Public manifest path for encrypted galleries
-                "unlisted": bool,             # Whether gallery is hidden from listings
+                "unlisted": bool,             # Hidden from listings; encrypted defaults true unless YAML unlisted: false
                 "cover": dict | None          # Cover image metadata or None
             }
 
@@ -284,8 +300,7 @@ def process_gallery(gallery_path: str) -> dict:
         gallery_data['storage_token_hash_hex'] = ''
         gallery_data['manifest_path'] = ''
 
-    # Handle unlisted galleries - encrypted galleries are always unlisted
-    gallery_data['unlisted'] = is_encrypted or gallery_config.get('unlisted', False)
+    gallery_data['unlisted'] = resolve_unlisted(is_encrypted, gallery_config)
 
     metadata_dir = os.path.join(config['output_path'], 'metadata', gallery_id)
     image_files = [f for f in os.listdir(metadata_dir) 

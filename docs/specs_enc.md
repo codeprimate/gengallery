@@ -30,7 +30,7 @@ The gallery metadata (stored in metadata/GALLERY_ID/index.json) includes:
   "encrypted": true,
   "private_gallery_id": "sha256_hash[:16]",  // First 16 chars of SHA-256(galleryId:password)
   "private_gallery_id_hash": "sha256_hash",  // SHA-256(private_gallery_id) for verification
-  "unlisted": true,  // Encrypted galleries are always unlisted
+  "unlisted": true,  // Default true; false only if YAML sets unlisted: false (featured home listing)
   // ... other standard gallery fields ...
 }
 ```
@@ -38,7 +38,7 @@ The gallery metadata (stored in metadata/GALLERY_ID/index.json) includes:
 ### Security Model Updates
 - Private gallery ID is never stored in metadata
 - Only the hash of the private gallery ID is stored for verification
-- Encrypted galleries are automatically marked as unlisted
+- Encrypted galleries default to **unlisted** in metadata; they can appear on the home (featured) listing only with explicit `unlisted: false` and the `featured` tag. Their YAML tags are not used for tag listing pages or the Browse cloud.
 - Image IDs for encrypted galleries use SHA-256 instead of MD5
 - All encryption/decryption parameters are deterministically generated
 - No encryption keys or IVs are stored in metadata
