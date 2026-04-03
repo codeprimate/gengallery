@@ -15,7 +15,8 @@ def test_build_rsync_argv_trailing_slashes():
         "/data/gallery/",
     )
     assert argv[0] == "rsync"
-    assert "-avz" in argv
+    assert "-az" in argv
+    assert "--progress" in argv
     assert "--delete" in argv
     assert argv[-2].endswith("/")
     assert argv[-1] == "admin@example.com:/data/gallery/"

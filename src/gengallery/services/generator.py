@@ -318,6 +318,13 @@ def generate_gallery_pages(config, galleries_data, output_path) -> list[dict]:
                 context,
             )
 
+        valid_html = {'index.html', gallery_config['output_filename']}
+        valid_html |= {f"{img['id']}.html" for img in gallery['images']}
+        valid_html |= {f"{video['id']}.html" for video in gallery.get('videos') or []}
+        for fname in os.listdir(gallery_dir):
+            if fname.endswith('.html') and fname not in valid_html:
+                os.remove(os.path.join(gallery_dir, fname))
+
         gallery_summaries.append({
             'title': gallery.get('title', gallery['id']),
             'image_count': len(gallery['images']),

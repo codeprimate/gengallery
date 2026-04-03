@@ -30,6 +30,7 @@ class VideoStageResult:
 @dataclass
 class GalleryIndexResult:
     indexed: list[str]
+    removed: list[str]
     failed: list[str]
     elapsed: float
 

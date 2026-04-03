@@ -83,10 +83,15 @@ def _print_gallery_index_result(result: GalleryIndexResult) -> None:
     if result.indexed:
         chips = "  ".join(f"[green]✓[/green] [blue]{gid}[/blue]" for gid in result.indexed)
         _CONSOLE.print(f"         {chips}")
+    if result.removed:
+        for gid in result.removed:
+            _CONSOLE.print(f"         [yellow]−[/yellow] {gid}")
     if result.failed:
         for gid in result.failed:
             _CONSOLE.print(f"         [red]✗[/red] {gid}")
     parts = [f"[green]{len(result.indexed)}[/green] indexed"]
+    if result.removed:
+        parts.append(f"[yellow]{len(result.removed)} removed[/yellow]")
     if result.failed:
         parts.append(f"[red]{len(result.failed)} failed[/red]")
     parts.append(_fmt_elapsed(result.elapsed))

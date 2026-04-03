@@ -16,11 +16,11 @@ def build_rsync_argv(
     host: str,
     destination: str,
 ) -> list[str]:
-    """Argv for ``rsync -avz --delete`` mirroring legacy trailing-slash semantics."""
+    """Argv for ``rsync -az --progress --delete`` mirroring legacy trailing-slash semantics."""
     ssh_host = f"{user}@{host}"
     src = local_export_dir.as_posix().rstrip("/") + "/"
     remote = destination.rstrip("/") + "/" if destination else "/"
-    return ["rsync", "-avz", "--delete", src, f"{ssh_host}:{remote}"]
+    return ["rsync", "-az", "--progress", "--delete", src, f"{ssh_host}:{remote}"]
 
 
 def build_ssh_argv(user: str, host: str, remote_command: str) -> list[str]:

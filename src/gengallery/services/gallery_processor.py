@@ -20,6 +20,7 @@ The script expects a config.yaml file in the current directory with the followin
 
 import os
 import json
+import shutil
 import yaml
 import sys
 import time
@@ -459,6 +460,20 @@ def run() -> GalleryIndexResult:
         if os.path.isdir(os.path.join(config['source_path'], g))
     ]
 
+    source_set = set(galleries)
+    metadata_root = os.path.join(config['output_path'], 'metadata')
+    removed: list[str] = []
+    if os.path.isdir(metadata_root):
+        for entry in os.listdir(metadata_root):
+            if not os.path.isdir(os.path.join(metadata_root, entry)):
+                continue
+            if entry not in source_set:
+                shutil.rmtree(os.path.join(metadata_root, entry))
+                public_dir = os.path.join(config['output_path'], 'public_html', 'galleries', entry)
+                if os.path.exists(public_dir):
+                    shutil.rmtree(public_dir)
+                removed.append(entry)
+
     galleries_data = {
         "last_updated": datetime.now().isoformat(),
         "galleries": []
@@ -492,6 +507,7 @@ def run() -> GalleryIndexResult:
 
     return GalleryIndexResult(
         indexed=indexed,
+        removed=removed,
         failed=failed,
         elapsed=time.time() - t0,
     )
