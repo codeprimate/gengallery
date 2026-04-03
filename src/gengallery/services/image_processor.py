@@ -56,11 +56,10 @@ import exif
 import yaml
 from fractions import Fraction
 import hashlib
+import time
 import warnings
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, TimeRemainingColumn
-from rich.panel import Panel
-from rich.text import Text
 import sys
 from pillow_heif import register_heif_opener
 from gengallery.services.crypto_v1 import (
@@ -69,6 +68,7 @@ from gengallery.services.crypto_v1 import (
     derive_storage_token_bytes,
 )
 from gengallery.services.envelope_v1 import decrypt_payload, encrypt_payload
+from gengallery.services.pipeline_types import ImageStageResult
 
 # Suppress specific warnings
 warnings.filterwarnings("ignore", category=Image.DecompressionBombWarning)
@@ -193,7 +193,6 @@ def get_exif_data(image_path: str) -> dict:
 
     exif_data = {}
     
-    # Extract relevant EXIF data
     exif_fields = [
         ('Orientation', 'orientation'),
         ('Make', 'make'),
@@ -220,7 +219,6 @@ def get_exif_data(image_path: str) -> dict:
                 value = value.name
             exif_data[exif_tag] = value
 
-    # Handle special cases
     if 'ExposureTime' in exif_data:
         exposure_time = Fraction(exif_data['ExposureTime']).limit_denominator()
         exif_data['ExposureTime'] = f"{exposure_time.numerator}/{exposure_time.denominator}"
@@ -343,15 +341,13 @@ def check_output_files(image_path: str, gallery_id: str, image_id: str, is_encry
     Note:
         Checks modification times of source image, config files, and all size variants.
     """
-    # Get the latest modification time among source files
     source_mtimes = [
-        os.path.getmtime(image_path),  # Image modification time
-        os.path.getmtime('config.yaml'),  # Global config modification time
-        os.path.getmtime(os.path.join(config['source_path'], gallery_id, 'gallery.yaml'))  # Gallery config modification time
+        os.path.getmtime(image_path),
+        os.path.getmtime('config.yaml'),
+        os.path.getmtime(os.path.join(config['source_path'], gallery_id, 'gallery.yaml'))
     ]
     latest_source_mtime = max(source_mtimes)
     
-    # Check each size variant
     variant_extension = get_variant_extension(is_encrypted)
     for size_name in config['image_sizes'].keys():
         output_path = os.path.join(
@@ -367,7 +363,6 @@ def check_output_files(image_path: str, gallery_id: str, image_id: str, is_encry
         if os.path.getmtime(output_path) < latest_source_mtime:
             return False
     
-    # Check metadata file
     metadata_path = os.path.join(
         config['output_path'],
         'metadata',
@@ -410,7 +405,6 @@ def verify_encryption(encrypted_path: str, original_path: str, password: str, ga
     Raises:
         ValueError: If decrypted content doesn't match original
     """
-    # Read files and calculate initial hashes
     with open(original_path, 'rb') as f:
         original_data = f.read()
         original_hash = hashlib.md5(original_data).hexdigest()
@@ -447,10 +441,9 @@ def extract_image_data(image_path: str, img_file, img: Image.Image) -> tuple[dic
         exif_data = get_exif_data(image_path)
         lat, lon = get_lat_lon(exif_img)
     except (UnpackError, ValueError):
-        exif_data = get_pil_exif_data(img)  # Now img is properly defined
+        exif_data = get_pil_exif_data(img)
         lat, lon = None, None
     
-    # Handle missing date
     if 'DateTimeOriginal' not in exif_data:
         file_mtime = os.path.getmtime(image_path)
         exif_data['DateTimeOriginal'] = datetime.fromtimestamp(file_mtime).strftime('%Y:%m:%d %H:%M:%S')
@@ -558,17 +551,14 @@ def process_image_variants(img: Image.Image, image_id: str, gallery_id: str,
         if is_encrypted:
             temp_path = os.path.join(output_dir, f"{image_id}{TEMP_PLAINTEXT_SUFFIX}")
             try:
-                # Save unencrypted version to temp file
                 img_copy.save(temp_path, "JPEG", quality=config['jpg_quality'])
                 
-                # Encrypt the file
                 key = derive_encryption_params(gallery_id, image_id, gallery_config['password'])
                 nonce_material = (
                     f'{GCM_NONCE_MATERIAL_PREFIX_IMAGE_VARIANT}|{gallery_id}|{image_id}|{size_name}'
                 ).encode('utf-8')
                 encrypted_data = encrypt_file(temp_path, key, nonce_material)
                 
-                # Write encrypted data
                 with open(output_path, 'wb') as f:
                     f.write(encrypted_data)
             except Exception as e:
@@ -579,28 +569,24 @@ def process_image_variants(img: Image.Image, image_id: str, gallery_id: str,
         else:
             img_copy.save(output_path, "JPEG", quality=config['jpg_quality'])
 
-def process_image(image_path: str, gallery_id: str, gallery_config: dict, progress: Progress = None, 
-                 image_number: int = None, total_images: int = None) -> dict:
+def process_image(image_path: str, gallery_id: str, gallery_config: dict,
+                  progress: Progress = None, task=None) -> tuple[dict, bool]:
     """
     Process a single image through the gallery preparation pipeline.
+
+    Returns:
+        tuple: (metadata_dict, was_skipped)
     """
     filename = os.path.basename(image_path)
     
-    # Generate image ID and check if processing needed
     is_encrypted = gallery_config.get('encrypted', False)
     image_id = (hashlib.sha256(f"{gallery_id}:{filename}".encode()).hexdigest()[:16] 
                 if is_encrypted else generate_image_id(filename, gallery_id))
 
     if check_output_files(image_path, gallery_id, image_id, is_encrypted):
-        if progress:
-            task = progress.add_task(
-                f"[green]✓ Skipping {filename}[/] ({image_number}/{total_images})",
-                total=100
-            )
-            progress.update(task, completed=100)
-            progress.remove_task(task)
+        if progress and task is not None:
+            progress.advance(task)
         
-        # Return existing metadata
         metadata_path = os.path.join(config['output_path'], 'metadata', gallery_id, f"{image_id}.json")
         with open(metadata_path, 'r') as f:
             existing_metadata = json.load(f)
@@ -609,46 +595,26 @@ def process_image(image_path: str, gallery_id: str, gallery_config: dict, progre
             if existing_metadata != public_metadata:
                 with open(metadata_path, 'w') as metadata_file:
                     json.dump(public_metadata, metadata_file, indent=2)
-            return public_metadata
-        return existing_metadata
-
-    if progress:
-        task = progress.add_task(
-            f"[cyan]{filename}[/] ({image_number}/{total_images})",
-            total=100
-        )
-        progress.update(task, completed=5)
+            return public_metadata, True
+        return existing_metadata, True
 
     with Image.open(image_path) as img, open(image_path, 'rb') as img_file:
-        # Extract EXIF and location data
         exif_data, lat, lon = extract_image_data(image_path, img_file, img)
-        if progress:
-            progress.update(task, completed=25)
-
-        # Create metadata dictionary
         output_metadata = create_metadata_dict(image_path, image_id, gallery_id, exif_data, lat, lon, is_encrypted)
-        if progress:
-            progress.update(task, completed=40)
-
-        # Process image variants
         process_image_variants(img, image_id, gallery_id, is_encrypted, gallery_config)
         if is_encrypted:
             write_encrypted_metadata_blob(output_metadata, gallery_id, gallery_config['password'])
-        if progress:
-            progress.update(task, completed=90)
 
-        # Save metadata
         metadata_dir = os.path.join(config['output_path'], 'metadata', gallery_id)
         os.makedirs(metadata_dir, exist_ok=True)
         metadata_path = os.path.join(metadata_dir, f"{image_id}.json")
         with open(metadata_path, 'w') as f:
             json.dump(create_public_metadata_dict(output_metadata, is_encrypted), f, indent=2)
 
-        if progress:
-            progress.update(task, completed=100)
-            progress.remove_task(task)
+        if progress and task is not None:
+            progress.advance(task)
 
-    return output_metadata
+    return output_metadata, False
 
 def get_image_metadata(image_path: str) -> dict:
     """
@@ -667,7 +633,6 @@ def get_image_metadata(image_path: str) -> dict:
     if os.path.exists(metadata_path):
         with open(metadata_path, 'r') as f:
             metadata = yaml.safe_load(f) or {}
-            # Ensure tags is always a list
             if 'tags' in metadata and not isinstance(metadata['tags'], list):
                 metadata['tags'] = [metadata['tags']]
             elif 'tags' not in metadata:
@@ -681,22 +646,10 @@ def rotate_image(img: Image.Image, orientation: int) -> Image.Image:
 
     Args:
         img: PIL Image object to transform
-        orientation: EXIF orientation value (1-8):
-            1: Normal (no rotation/flip needed)
-            2: Mirrored horizontal
-            3: Rotated 180°
-            4: Mirrored vertical
-            5: Mirrored horizontal then rotated 90° CCW
-            6: Rotated 90° CW
-            7: Mirrored horizontal then rotated 90° CW
-            8: Rotated 90° CCW
+        orientation: EXIF orientation value (1-8)
 
     Returns:
         Image.Image: Transformed PIL Image object
-
-    Note:
-        Most digital cameras store images in landscape orientation (6).
-        The transformation order matters for combined operations.
     """
     if orientation == 2:
         return img.transpose(Image.FLIP_LEFT_RIGHT)
@@ -714,42 +667,60 @@ def rotate_image(img: Image.Image, orientation: int) -> Image.Image:
         return img.rotate(90, expand=True)
     return img
 
-def process_gallery(gallery: str) -> tuple[int, int]:
+
+def discover_galleries() -> dict[str, int]:
+    """Return {gallery_id: image_count} for all galleries that have at least one image."""
+    result = {}
+    source = config['source_path']
+    for gallery in sorted(os.listdir(source)):
+        if not os.path.isdir(os.path.join(source, gallery)):
+            continue
+        gallery_path = os.path.join(source, gallery)
+        images = sorted(
+            img for img in os.listdir(gallery_path)
+            if img.lower().endswith(SUPPORTED_FORMATS)
+        )
+        if images:
+            result[gallery] = len(images)
+    return result
+
+
+def run(gallery_names: list[str]) -> ImageStageResult:
     """
-    Process all supported images within a gallery directory.
+    Process images for the given galleries.
+
+    Produces no console output except Rich progress bars.
 
     Args:
-        gallery: Name of the gallery directory to process
+        gallery_names: Ordered list of gallery IDs to process.
 
     Returns:
-        tuple: (successful_count, failed_count) indicating processing results
-
-    Note:
-        Gallery directory must contain gallery.yaml configuration file.
-        Only processes files with supported extensions (see SUPPORTED_FORMATS).
+        ImageStageResult with counts and elapsed time.
     """
-    success = failed = 0
-    gallery_path = os.path.join(config['source_path'], gallery)
-    
-    if not os.path.isdir(gallery_path):
-        return success, failed
+    t0 = time.time()
+    gallery_counts: dict[str, int] = {}
+    total = processed = skipped = failed = 0
+    errors: list[tuple[str, str]] = []
 
-    gallery_config_path = os.path.join(gallery_path, 'gallery.yaml')
-    with open(gallery_config_path, 'r') as f:
-        gallery_config = yaml.safe_load(f)
-    if gallery_config.get('encrypted', False):
-        clean_encrypted_variant_outputs(gallery)
-    
-    images = sorted(
-        img for img in os.listdir(gallery_path)
-        if img.lower().endswith(SUPPORTED_FORMATS)
-    )
-    
-    if not images:
-        return success, failed
-
-    console.print(f"\n[bold yellow]⚡ Processing gallery: {gallery}[/]")
-    console.print(f"  • Found [green]{len(images)}[/] images to process")
+    galleries_with_images: list[tuple[str, list[str], dict]] = []
+    for gallery_name in gallery_names:
+        gallery_path = os.path.join(config['source_path'], gallery_name)
+        if not os.path.isdir(gallery_path):
+            continue
+        images = sorted(
+            img for img in os.listdir(gallery_path)
+            if img.lower().endswith(SUPPORTED_FORMATS)
+        )
+        if not images:
+            continue
+        gallery_config_path = os.path.join(gallery_path, 'gallery.yaml')
+        with open(gallery_config_path, 'r') as f:
+            gallery_config = yaml.safe_load(f)
+        if gallery_config.get('encrypted', False):
+            clean_encrypted_variant_outputs(gallery_name)
+        gallery_counts[gallery_name] = len(images)
+        total += len(images)
+        galleries_with_images.append((gallery_name, images, gallery_config))
 
     with Progress(
         SpinnerColumn(),
@@ -759,151 +730,86 @@ def process_gallery(gallery: str) -> tuple[int, int]:
         TimeElapsedColumn(),
         TimeRemainingColumn(),
         console=console,
-        expand=True
+        expand=True,
     ) as progress:
-        overall_task = progress.add_task(
-            "[cyan]Overall Progress",
-            total=len(images)
-        )
-        
-        for idx, image in enumerate(images, 1):
-            image_path = os.path.join(gallery_path, image)
-            gallery_id = os.path.basename(gallery_path)
-            
-            try:
-                process_image(image_path, gallery_id, gallery_config, progress, idx, len(images))
-                success += 1
-            except Exception as e:
-                console.print(f"[red]Error processing {image}: {str(e)}[/]")
-                failed += 1
-            
-            progress.advance(overall_task)
+        overall_task = progress.add_task("[cyan]Overall", total=total)
 
-    return success, failed
+        for gallery_name, images, gallery_config in galleries_with_images:
+            gallery_task = progress.add_task(
+                f"[blue]{gallery_name}[/] ({len(images)} images)",
+                total=len(images),
+            )
+            for image in images:
+                image_path = os.path.join(config['source_path'], gallery_name, image)
+                try:
+                    _, was_skipped = process_image(
+                        image_path, gallery_name, gallery_config,
+                        progress, gallery_task,
+                    )
+                    if was_skipped:
+                        skipped += 1
+                    else:
+                        processed += 1
+                except Exception as e:
+                    errors.append((image, str(e)))
+                    failed += 1
+                progress.advance(overall_task)
+
+            progress.update(gallery_task, completed=len(images))
+
+    return ImageStageResult(
+        gallery_counts=gallery_counts,
+        total=total,
+        processed=processed,
+        skipped=skipped,
+        failed=failed,
+        elapsed=time.time() - t0,
+        errors=errors,
+    )
+
 
 def main() -> None:
-    """
-    Main entry point for the image processing script.
-
-    Handles command line arguments and coordinates gallery processing.
-    Provides real-time feedback and processing summary.
-
-    Exit codes:
-        0: Success - all images processed
-        1: No arguments provided
-        2: No galleries found
-        3: One or more images failed
-        130: Keyboard interrupt
-    """
+    """Entry point for standalone invocation."""
     try:
         parser = argparse.ArgumentParser(description='Process image galleries.')
         parser.add_argument('--all', action='store_true', help='Process all galleries')
         parser.add_argument('gallery', nargs='?', help='Name of the gallery to process')
-        
         args = parser.parse_args()
 
-        # Show welcome banner
-        title = Text("Gallery Image Processor", style="bold cyan")
-        console.print(Panel(title, border_style="cyan"))
-
-        # Check for no arguments
         if not args.all and not args.gallery:
             parser.print_help()
             sys.exit(1)
 
-        # Find galleries and count images
-        console.print("\n[bold yellow]🔍 Finding galleries...[/]")
-        galleries = []
-        total_images = 0
-        
+        counts = discover_galleries()
         if args.all:
-            gallery_paths = [g for g in os.listdir(config['source_path']) 
-                          if os.path.isdir(os.path.join(config['source_path'], g))]
+            gallery_names = list(counts)
         else:
-            gallery_paths = [args.gallery] if os.path.exists(os.path.join(config['source_path'], args.gallery)) else []
+            gallery_names = [args.gallery] if args.gallery in counts else []
 
-        # Count images in each gallery
-        for gallery in gallery_paths:
-            gallery_path = os.path.join(config['source_path'], gallery)
-            images = sorted(
-                img for img in os.listdir(gallery_path)
-                if img.lower().endswith(SUPPORTED_FORMATS)
-            )
-            num_images = len(images)
-            if num_images > 0:
-                galleries.append((gallery, images))
-                total_images += num_images
-                console.print(f"  • [blue]{gallery}[/] → found [green]{num_images}[/] images")
-
-        if not galleries:
-            console.print("\n[red]❌ No galleries or images found[/]")
+        if not gallery_names:
+            console.print("[red]No galleries or images found[/]")
             sys.exit(2)
 
-        console.print(f"[green]✓ Found {len(galleries)} galleries with {total_images} total images[/]")
+        result = run(gallery_names)
 
-        console.print("\n[bold yellow]⚡ Processing galleries...[/]")
+        parts = [f"[green]{result.processed}[/] processed"]
+        if result.skipped:
+            parts.append(f"[dim]{result.skipped} up-to-date[/]")
+        if result.failed:
+            parts.append(f"[red]{result.failed} failed[/]")
+        parts.append(f"[dim]{result.elapsed:.2f}s[/]")
+        console.print("  " + "  ·  ".join(parts))
 
-        # Process galleries with nested progress bars
-        total_success = total_failed = 0
-        
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description: <50}"),
-            BarColumn(),
-            TaskProgressColumn(),
-            TimeElapsedColumn(),
-            TimeRemainingColumn(),
-            console=console,
-            expand=True
-        ) as progress:
-            overall_task = progress.add_task(
-                "[cyan]Overall Progress",
-                total=total_images
-            )
-            gallery_task = progress.add_task(
-                "[blue]Gallery: None",
-                total=None
-            )
+        for filename, msg in result.errors:
+            console.print(f"  [red]✗[/] {filename} — {msg}")
 
-            for gallery_name, images in galleries:
-                # Updated gallery progress description with highlighted name
-                progress.update(gallery_task, 
-                              description=f"[cyan]{gallery_name}[/] ({len(images)} images)",
-                              total=len(images),
-                              completed=0)
-
-                gallery_config_path = os.path.join(config['source_path'], gallery_name, 'gallery.yaml')
-                with open(gallery_config_path, 'r') as f:
-                    gallery_config = yaml.safe_load(f)
-
-                for idx, image in enumerate(images, 1):
-                    image_path = os.path.join(config['source_path'], gallery_name, image)
-
-                    try:
-                        process_image(image_path, gallery_name, gallery_config, progress, idx, len(images))
-                        total_success += 1
-                    except Exception as e:
-                        console.print(f"[red]Error processing {image}: {str(e)}[/]")
-                        total_failed += 1
-
-                    progress.advance(overall_task)
-                    progress.advance(gallery_task)
-
-                progress.update(gallery_task, completed=len(images))
-
-        # Print summary
-        console.print("\n[bold]Processing Summary[/]")
-        console.print(f"  ✓ Successfully processed: [green]{total_success}[/] images")
-        if total_failed:
-            console.print(f"  ✗ Failed to process: [red]{total_failed}[/] images")
+        if result.failed:
             sys.exit(3)
-        
-        console.print("\n[bold green]✨ All images processed successfully![/]")
-        # sys.exit(0)
 
     except KeyboardInterrupt:
         console.print("\n[yellow]Processing interrupted by user[/]")
         sys.exit(130)
+
 
 if __name__ == "__main__":
     main()

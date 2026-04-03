@@ -11,10 +11,10 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 import yaml
 from rich.console import Console
-from rich.panel import Panel
 from rich.progress import (
     BarColumn,
     Progress,
@@ -24,7 +24,6 @@ from rich.progress import (
     TimeElapsedColumn,
     TimeRemainingColumn,
 )
-from rich.text import Text
 
 from gengallery.services.crypto_v1 import derive_metadata_key_bytes, derive_storage_token_bytes
 from gengallery.services.envelope_v1 import encrypt_payload
@@ -38,6 +37,7 @@ from gengallery.services.image_processor import (
     get_image_metadata,
     get_variant_extension,
 )
+from gengallery.services.pipeline_types import VideoStageResult
 from gengallery.services.video_encoding import (
     VIDEO_MAX_DURATION_SECONDS,
     build_aac_audio_args,
@@ -327,21 +327,21 @@ def process_video(
     gallery_id: str,
     gallery_config: dict,
     progress: Progress | None = None,
-    video_number: int | None = None,
-    total_videos: int | None = None,
-) -> dict:
+    overall_task=None,
+) -> tuple[dict, bool]:
+    """
+    Process a single video.
+
+    Returns:
+        tuple: (metadata_dict, was_skipped)
+    """
     basename = os.path.basename(video_path)
     is_encrypted = gallery_config.get("encrypted", False)
     video_id = generate_video_id(basename, gallery_id, is_encrypted)
 
     if check_video_outputs(video_path, gallery_id, video_id, is_encrypted):
-        if progress and video_number and total_videos:
-            task = progress.add_task(
-                f"[green]✓ Skipping {basename}[/] ({video_number}/{total_videos})",
-                total=100,
-            )
-            progress.update(task, completed=100)
-            progress.remove_task(task)
+        if progress and overall_task is not None:
+            progress.advance(overall_task)
         meta_path = os.path.join(
             config["output_path"], "metadata", gallery_id, f"{video_id}.json"
         )
@@ -352,21 +352,13 @@ def process_video(
             if existing != public_meta:
                 with open(meta_path, "w", encoding="utf-8") as mf:
                     json.dump(public_meta, mf, indent=2)
-            return public_meta
-        return existing
-
-    if progress and video_number and total_videos:
-        task = progress.add_task(
-            f"[cyan]{basename}[/] ({video_number}/{total_videos})",
-            total=100,
-        )
-        progress.update(task, completed=5)
+            return public_meta, True
+        return existing, True
 
     probe = ffprobe_video(video_path)
     iw, ih, duration_raw, creation_tag = parse_ffprobe_dimensions_and_duration(probe)
     out_w, out_h = compute_output_dimensions(iw, ih)
     video_bps = select_video_bitrate_bps(out_h)
-    clamped_d = clamp_duration_seconds(duration_raw)
     seek = poster_seek_seconds(duration_raw)
 
     sidecar = get_image_metadata(video_path)
@@ -403,11 +395,7 @@ def process_video(
         play_tmp = os.path.join(video_dir, f"{video_id}{TEMP_VIDEO_PLAINTEXT_SUFFIX}")
         try:
             run_ffmpeg_thumbnail(video_path, seek, thumb_tmp, thumb_max)
-            if progress:
-                progress.update(task, completed=35)
             run_ffmpeg_transcode(video_path, play_tmp, out_w, out_h, video_bps)
-            if progress:
-                progress.update(task, completed=65)
 
             encrypt_variant_file(
                 thumb_tmp,
@@ -436,11 +424,7 @@ def process_video(
                     os.unlink(tmp)
     else:
         run_ffmpeg_thumbnail(video_path, seek, thumb_final, thumb_max)
-        if progress:
-            progress.update(task, completed=35)
         run_ffmpeg_transcode(video_path, play_final, out_w, out_h, video_bps)
-        if progress:
-            progress.update(task, completed=65)
 
     metadata_dir = os.path.join(config["output_path"], "metadata", gallery_id)
     os.makedirs(metadata_dir, exist_ok=True)
@@ -453,11 +437,10 @@ def process_video(
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(to_write, f, indent=2)
 
-    if progress:
-        progress.update(task, completed=100)
-        progress.remove_task(task)
+    if progress and overall_task is not None:
+        progress.advance(overall_task)
 
-    return to_write
+    return to_write, False
 
 
 def list_gallery_videos(gallery_path: str) -> list[str]:
@@ -471,25 +454,56 @@ def list_gallery_videos(gallery_path: str) -> list[str]:
     return [os.path.join(gallery_path, f) for f in names]
 
 
-def process_gallery_videos(gallery_name: str) -> tuple[int, int]:
-    success = failed = 0
-    gallery_path = os.path.join(config["source_path"], gallery_name)
-    if not os.path.isdir(gallery_path):
-        return success, failed
+def discover_gallery_videos() -> dict[str, int]:
+    """Return {gallery_id: video_count} for galleries that have at least one video."""
+    result = {}
+    source = config["source_path"]
+    for gallery in sorted(os.listdir(source)):
+        gallery_path = os.path.join(source, gallery)
+        if not os.path.isdir(gallery_path):
+            continue
+        videos = list_gallery_videos(gallery_path)
+        if videos:
+            result[gallery] = len(videos)
+    return result
 
-    gallery_yaml = os.path.join(gallery_path, "gallery.yaml")
-    with open(gallery_yaml, "r", encoding="utf-8") as f:
-        gallery_config = yaml.safe_load(f)
 
-    if gallery_config.get("encrypted", False):
-        clean_encrypted_variant_outputs(gallery_name)
+def run(gallery_names: list[str]) -> VideoStageResult:
+    """
+    Transcode videos for the given galleries.
 
-    videos = list_gallery_videos(gallery_path)
-    if not videos:
-        return success, failed
+    Produces no console output except Rich progress bars.
 
-    console.print(f"\n[bold yellow]⚡ Processing videos: {gallery_name}[/]")
-    console.print(f"  • Found [green]{len(videos)}[/] video(s)")
+    Args:
+        gallery_names: Ordered list of gallery IDs to process.
+
+    Returns:
+        VideoStageResult with counts and elapsed time.
+    """
+    t0 = time.time()
+    gallery_counts: dict[str, int] = {}
+    total = processed = skipped = failed = 0
+    errors: list[tuple[str, str]] = []
+
+    galleries_with_videos: list[tuple[str, list[str], dict]] = []
+    for gallery_name in gallery_names:
+        gallery_path = os.path.join(config["source_path"], gallery_name)
+        if not os.path.isdir(gallery_path):
+            continue
+        gallery_yaml = os.path.join(gallery_path, "gallery.yaml")
+        with open(gallery_yaml, "r", encoding="utf-8") as f:
+            gallery_config = yaml.safe_load(f)
+
+        if gallery_config.get("encrypted", False):
+            clean_encrypted_variant_outputs(gallery_name)
+
+        videos = list_gallery_videos(gallery_path)
+        if not videos:
+            continue
+
+        gallery_counts[gallery_name] = len(videos)
+        total += len(videos)
+        galleries_with_videos.append((gallery_name, videos, gallery_config))
 
     with Progress(
         SpinnerColumn(),
@@ -501,59 +515,70 @@ def process_gallery_videos(gallery_name: str) -> tuple[int, int]:
         console=console,
         expand=True,
     ) as progress:
-        overall = progress.add_task("[cyan]Videos", total=len(videos))
-        for idx, vp in enumerate(videos, 1):
-            try:
-                process_video(
-                    vp,
-                    gallery_name,
-                    gallery_config,
-                    progress,
-                    idx,
-                    len(videos),
-                )
-                success += 1
-            except Exception as e:
-                console.print(f"[red]Error processing {vp}: {e}[/]")
-                failed += 1
-            progress.advance(overall)
+        overall_task = progress.add_task("[cyan]Videos", total=total)
 
-    return success, failed
+        for gallery_name, videos, gallery_config in galleries_with_videos:
+            for vp in videos:
+                try:
+                    _, was_skipped = process_video(
+                        vp, gallery_name, gallery_config, progress, overall_task
+                    )
+                    if was_skipped:
+                        skipped += 1
+                    else:
+                        processed += 1
+                except Exception as e:
+                    errors.append((os.path.basename(vp), str(e)))
+                    failed += 1
+                    if progress:
+                        progress.advance(overall_task)
+
+    return VideoStageResult(
+        gallery_counts=gallery_counts,
+        total=total,
+        processed=processed,
+        skipped=skipped,
+        failed=failed,
+        elapsed=time.time() - t0,
+        errors=errors,
+    )
 
 
 def main() -> None:
+    """Entry point for standalone invocation."""
     parser = argparse.ArgumentParser(description="Process gallery videos.")
     parser.add_argument("--all", action="store_true", help="Process all galleries")
     parser.add_argument("gallery", nargs="?", help="Gallery directory name")
     args = parser.parse_args()
 
-    title = Text("Gallery Video Processor", style="bold cyan")
-    console.print(Panel(title, border_style="cyan"))
-
     if not args.all and not args.gallery:
         parser.print_help()
         sys.exit(1)
 
+    counts = discover_gallery_videos()
     if args.all:
-        gallery_paths = [
-            g
-            for g in os.listdir(config["source_path"])
-            if os.path.isdir(os.path.join(config["source_path"], g))
-        ]
+        gallery_names = list(counts)
     else:
-        gp = os.path.join(config["source_path"], args.gallery)
-        gallery_paths = [args.gallery] if os.path.isdir(gp) else []
+        gallery_names = [args.gallery] if args.gallery in counts else []
 
-    total_ok = total_fail = 0
-    for gname in sorted(gallery_paths):
-        ok, fail = process_gallery_videos(gname)
-        total_ok += ok
-        total_fail += fail
+    if not gallery_names:
+        console.print("[yellow]No galleries with videos found[/]")
+        sys.exit(0)
 
-    console.print("\n[bold]Video processing summary[/]")
-    console.print(f"  ✓ Success: [green]{total_ok}[/]")
-    if total_fail:
-        console.print(f"  ✗ Failed: [red]{total_fail}[/]")
+    result = run(gallery_names)
+
+    parts = [f"[green]{result.processed}[/] processed"]
+    if result.skipped:
+        parts.append(f"[dim]{result.skipped} up-to-date[/]")
+    if result.failed:
+        parts.append(f"[red]{result.failed} failed[/]")
+    parts.append(f"[dim]{result.elapsed:.2f}s[/]")
+    console.print("  " + "  ·  ".join(parts))
+
+    for filename, msg in result.errors:
+        console.print(f"  [red]✗[/] {filename} — {msg}")
+
+    if result.failed:
         sys.exit(3)
 
 

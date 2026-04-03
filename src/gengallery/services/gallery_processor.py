@@ -22,12 +22,11 @@ import os
 import json
 import yaml
 import sys
+import time
 from datetime import datetime
 import hashlib
 import base64
 from rich.console import Console
-from rich.panel import Panel
-from rich.text import Text
 from gengallery.services.crypto_v1 import (
     STORAGE_TOKEN_INFO_PREFIX,
     derive_storage_token_bytes,
@@ -35,6 +34,7 @@ from gengallery.services.crypto_v1 import (
     get_gallery_salt_bytes,
 )
 from gengallery.services.image_processor import config
+from gengallery.services.pipeline_types import GalleryIndexResult
 
 console = Console()
 
@@ -92,7 +92,6 @@ def cleanup_missing_video(gallery_id: str, video_metadata: dict, source_path: st
     metadata_path = os.path.join(config['output_path'], 'metadata', gallery_id, f"{item_id}.json")
     if os.path.exists(metadata_path):
         os.remove(metadata_path)
-        console.print(f"  [yellow]→[/] Removed video metadata: [blue]{metadata_path}[/]")
 
     for ext in ('.jpg', '.enc'):
         thumb_path = os.path.join(
@@ -101,7 +100,6 @@ def cleanup_missing_video(gallery_id: str, video_metadata: dict, source_path: st
         )
         if os.path.exists(thumb_path):
             os.remove(thumb_path)
-            console.print(f"  [yellow]→[/] Removed video thumbnail: [blue]{thumb_path}[/]")
 
     for ext in ('.mp4', '.enc'):
         play_path = os.path.join(
@@ -110,7 +108,6 @@ def cleanup_missing_video(gallery_id: str, video_metadata: dict, source_path: st
         )
         if os.path.exists(play_path):
             os.remove(play_path)
-            console.print(f"  [yellow]→[/] Removed video playback: [blue]{play_path}[/]")
 
     metadata_blob_relpath = video_metadata.get('metadata_path', '')
     if metadata_blob_relpath:
@@ -121,7 +118,6 @@ def cleanup_missing_video(gallery_id: str, video_metadata: dict, source_path: st
         )
         if os.path.exists(metadata_blob_path):
             os.remove(metadata_blob_path)
-            console.print(f"  [yellow]→[/] Removed metadata blob: [blue]{metadata_blob_path}[/]")
 
     return True
 
@@ -146,13 +142,10 @@ def cleanup_missing_image(gallery_id: str, image_metadata: dict, source_path: st
     if os.path.exists(os.path.join(source_path, filename)):
         return False
         
-    # Remove metadata file
     metadata_path = os.path.join(config['output_path'], 'metadata', gallery_id, f"{image_metadata['id']}.json")
     if os.path.exists(metadata_path):
         os.remove(metadata_path)
-        console.print(f"  [yellow]→[/] Removed image metadata: [blue]{metadata_path}[/]")
     
-    # Remove processed images (legacy fallback paths)
     for size_name in config['image_sizes'].keys():
         legacy_output_image_path = os.path.join(
             config['output_path'], 'public_html', 'galleries',
@@ -165,9 +158,7 @@ def cleanup_missing_image(gallery_id: str, image_metadata: dict, source_path: st
         for output_image_path in (legacy_output_image_path, encrypted_output_image_path):
             if os.path.exists(output_image_path):
                 os.remove(output_image_path)
-                console.print(f"  [yellow]→[/] Removed image: [blue]{output_image_path}[/]")
 
-    # Remove metadata blob if present
     metadata_blob_relpath = image_metadata.get('metadata_path', '')
     if metadata_blob_relpath:
         metadata_blob_path = os.path.join(
@@ -177,7 +168,6 @@ def cleanup_missing_image(gallery_id: str, image_metadata: dict, source_path: st
         )
         if os.path.exists(metadata_blob_path):
             os.remove(metadata_blob_path)
-            console.print(f"  [yellow]→[/] Removed metadata blob: [blue]{metadata_blob_path}[/]")
             
     return True
 
@@ -283,64 +273,24 @@ def process_gallery(gallery_path: str) -> dict:
         gallery_path (str): Path to the gallery directory containing gallery.yaml and images
 
     Returns:
-        dict: A gallery metadata structure with the following format:
-            {
-                "id": str,                    # Unique gallery identifier (directory name)
-                "encrypted": bool,            # Whether gallery is password-protected
-                "name": str,                  # Gallery name (same as id)
-                "last_updated": str,          # Timestamp of last update (YYYY:MM:DD HH:MM:SS)
-                "title": str,                 # Gallery title from config
-                "date": str,                  # Gallery date (YYYY:MM:DD HH:MM:SS)
-                "display_date": str,          # Formatted date (e.g., "Monday, January 1, 2024")
-                "location": str,              # Gallery location from config
-                "description": str,           # Gallery description from config
-                "tags": List[str],            # List of gallery tags
-                "content": str,               # Additional content/notes
-                "images": List[dict],         # List of image metadata dictionaries
-                "requires_login": bool,        # Whether login gate is enabled
-                "storage_token_label": str,    # Token label/version marker
-                "salt_b64": str,               # Placeholder until v1 KDF is implemented
-                "storage_token_hash_hex": str, # Temporary verifier hash for gate checks
-                "manifest_path": str,         # Public manifest path for encrypted galleries
-                "unlisted": bool,             # Hidden from listings; encrypted defaults true unless YAML unlisted: false
-                "cover": dict | None          # Cover image metadata or None
-            }
-
-    The cover image dictionary has the following structure:
-        {
-            "id": str,           # Unique image identifier
-            "filename": str,     # Original image filename
-            "title": str,        # Image title
-            "caption": str,      # Image caption
-            "path": str,         # Path to cover-sized image
-            "thumbnail_path": str # Path to thumbnail image
-        }
+        dict: A gallery metadata structure.
 
     Raises:
         ValueError: If gallery is marked as encrypted but no password is provided
         FileNotFoundError: If gallery.yaml or required directories are missing
         json.JSONDecodeError: If image metadata files are corrupted
-
-    Note:
-        - The function expects a gallery.yaml file in the gallery directory
-        - Images are sorted by EXIF DateTimeOriginal in reverse chronological order
-        - Missing source images are automatically cleaned up from the output
-        - The last_updated timestamp is based on the newest file in the gallery
     """
     gallery_id = os.path.basename(gallery_path)
     
-    # Load gallery.yaml
     with open(os.path.join(gallery_path, 'gallery.yaml'), 'r') as f:
         gallery_config = yaml.safe_load(f)
 
     is_encrypted = gallery_config.get('encrypted', False)
     password = gallery_config.get('password', False)
     
-    # Validate password for encrypted galleries
     if is_encrypted and not password:
         raise ValueError(f"Gallery '{gallery_id}' is marked as encrypted but no password was provided")
 
-    # Initialize gallery data
     gallery_data = {
         "id": gallery_id,
         "encrypted": is_encrypted,
@@ -357,8 +307,6 @@ def process_gallery(gallery_path: str) -> dict:
         "videos": []
     }
 
-    # Process Security data
-    
     if password:
         storage_token_bytes = derive_storage_token_bytes(password, gallery_id)
         storage_token_hash_hex = derive_storage_token_hash_hex(storage_token_bytes)
@@ -389,7 +337,6 @@ def process_gallery(gallery_path: str) -> dict:
         with open(metadata_path, 'r') as f:
             item_metadata = json.load(f)
 
-        # Track if any cleanup occurred
         if cleanup_missing_item(gallery_id, item_metadata, gallery_path):
             cleanup_occurred = True
         elif item_metadata.get('media_type') == 'video':
@@ -397,16 +344,13 @@ def process_gallery(gallery_path: str) -> dict:
         else:
             gallery_data['images'].append(item_metadata)
 
-    # Update last_updated if files were removed
     if cleanup_occurred:
         gallery_data['last_updated'] = datetime.now().strftime('%Y:%m:%d %H:%M:%S')
 
-    # Process cover image
     cover_image_filename = gallery_config.get('cover', '')
-    gallery_data['cover'] = None  # Initialize as None
+    gallery_data['cover'] = None
     
     if cover_image_filename:
-        # Try to find cover image by filename first (comparing basenames)
         cover_basename = os.path.splitext(cover_image_filename)[0]
         cover_image = next(
             (img for img in gallery_data['images'] 
@@ -430,7 +374,6 @@ def process_gallery(gallery_path: str) -> dict:
                     "thumbnail_path": cover_image['thumbnail_path'],
                 }
     
-    # Fallback to first image if we have images but no valid cover
     if not gallery_data['cover'] and gallery_data['images']:
         first_image = gallery_data['images'][0]
         if is_encrypted:
@@ -449,7 +392,6 @@ def process_gallery(gallery_path: str) -> dict:
                 "thumbnail_path": first_image['thumbnail_path'],
             }
 
-    # Video-only cover: use first video thumbnail for hero (path + thumbnail_path)
     if not gallery_data['cover'] and gallery_data['videos']:
         first_video = gallery_data['videos'][0]
         thumb = first_video['thumbnail_path']
@@ -469,14 +411,12 @@ def process_gallery(gallery_path: str) -> dict:
                 "thumbnail_path": thumb,
             }
 
-    # Sort images and videos by date taken if available
     gallery_data['images'].sort(key=lambda x: x.get('exif', {}).get('DateTimeOriginal', ''), reverse=True)
     gallery_data['videos'].sort(key=lambda x: x.get('exif', {}).get('DateTimeOriginal', ''), reverse=True)
 
     if is_encrypted:
         gallery_data['manifest_path'] = write_manifest_file(gallery_data)
 
-    # Latest mtime of any file under the gallery source tree
     latest_ts = 0.0
     for root, _, files in os.walk(gallery_path):
         for fn in files:
@@ -491,7 +431,6 @@ def process_gallery(gallery_path: str) -> dict:
         latest_ts = datetime.now().timestamp()
     gallery_data['last_updated'] = datetime.fromtimestamp(latest_ts).strftime('%Y:%m:%d %H:%M:%S')
 
-    # Save individual gallery metadata
     gallery_json_output_path = os.path.join(
         config['output_path'], 'metadata', gallery_id, 'index.json'
     )
@@ -501,30 +440,32 @@ def process_gallery(gallery_path: str) -> dict:
 
     return gallery_data
 
-def main():
-    """
-    Process all galleries in the configured source path.
-    """
-    # Show welcome banner
-    title = Text("Gallery Processor", style="bold cyan")
-    console.print(Panel(title, border_style="cyan"))
 
-    # Find galleries and count images
-    console.print("\n[bold yellow]🔍 Finding galleries...[/]")
-    galleries = [g for g in os.listdir(config['source_path']) 
-                if os.path.isdir(os.path.join(config['source_path'], g))]
-    
-    if not galleries:
-        console.print("\n[red]❌ No galleries found[/]")
-        return
+def run() -> GalleryIndexResult:
+    """
+    Index all galleries and write metadata.
 
-    # Count images in each gallery
-    total_images = 0
-    gallery_info = []
-    
-    # Modified gallery information output
-    for gallery in galleries:
-        metadata_dir = os.path.join(config['output_path'], 'metadata', gallery)
+    Produces no console output.
+
+    Returns:
+        GalleryIndexResult with lists of indexed and failed gallery IDs and elapsed time.
+    """
+    t0 = time.time()
+    indexed: list[str] = []
+    failed: list[str] = []
+
+    galleries = [
+        g for g in os.listdir(config['source_path'])
+        if os.path.isdir(os.path.join(config['source_path'], g))
+    ]
+
+    galleries_data = {
+        "last_updated": datetime.now().isoformat(),
+        "galleries": []
+    }
+
+    for gallery_name in sorted(galleries):
+        metadata_dir = os.path.join(config['output_path'], 'metadata', gallery_name)
         try:
             image_files = sorted(
                 f for f in os.listdir(metadata_dir)
@@ -532,55 +473,48 @@ def main():
             )
         except FileNotFoundError:
             image_files = []
-        num_items = len(image_files)
-        if num_items > 0:
-            gallery_info.append((gallery, image_files))
-            total_images += num_items
-            console.print(f"  • [blue]{gallery}[/] → found [green]{num_items}[/] metadata file(s)")
-        else:
-            console.print(f"  • [blue]{gallery}[/] → [yellow]no gallery items[/]")
 
-    console.print("[bold green]✓[/] Found [bold]{} galleries[/] with [bold]{} total images[/]".format(
-        len(galleries), total_images
-    ))
-    console.print("\n[bold yellow]⚡Processing Galleries:[/]")
+        if not image_files:
+            continue
 
-    # Process galleries
-    success = failed = 0
-    galleries_data = {
-        "last_updated": datetime.now().isoformat(),
-        "galleries": []
-    }
-    
-    for gallery_name, image_files in gallery_info:
-        console.print(f"[yellow] →[/] Processing: [bold blue]{gallery_name}[/]")
         try:
             source_path = os.path.join(config['source_path'], gallery_name)
             gallery_data = process_gallery(source_path)
             galleries_data['galleries'].append(gallery_data)
-            success += 1
-            console.print(f"[green]  ✓[/] Generated: [blue]{gallery_name}/index.json[/]")
-            
-        except Exception as e:
-            failed += 1
-            console.print(f"[red]✗ Error processing {gallery_name}: {str(e)}[/]")
+            indexed.append(gallery_name)
+        except Exception:
+            failed.append(gallery_name)
 
-    # Write galleries.json
     json_output_path = os.path.join(config['output_path'], 'metadata', 'galleries.json')
     os.makedirs(os.path.dirname(json_output_path), exist_ok=True)
     with open(json_output_path, 'w') as f:
         json.dump(galleries_data, f, indent=2)
-    console.print(f"[green]✓[/] Generated main index: [blue]galleries.json[/]")
 
-    # Print summary
-    console.print("\n[bold]Processing Summary[/]")
-    console.print(f"  [green]✓[/] Processed: [bold]{success}[/] galleries")
-    if failed:
-        console.print(f"  [red]✗[/] Failed: [bold]{failed}[/] galleries")
-        console.print("\n[bold red]⚠️  Some galleries failed to process[/]")
+    return GalleryIndexResult(
+        indexed=indexed,
+        failed=failed,
+        elapsed=time.time() - t0,
+    )
+
+
+def main():
+    """Entry point for standalone invocation."""
+    result = run()
+
+    parts = [f"[green]{len(result.indexed)}[/] indexed"]
+    if result.failed:
+        parts.append(f"[red]{len(result.failed)} failed[/]")
+    parts.append(f"[dim]{result.elapsed:.2f}s[/]")
+    console.print("  " + "  ·  ".join(parts))
+
+    for gallery_id in result.indexed:
+        console.print(f"  [green]✓[/] {gallery_id}")
+    for gallery_id in result.failed:
+        console.print(f"  [red]✗[/] {gallery_id}")
+
+    if result.failed:
         sys.exit(3)
-    else:
-        console.print("\n[bold green]✨ All galleries processed successfully![/]")
+
 
 if __name__ == "__main__":
     main()

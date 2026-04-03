@@ -4,17 +4,15 @@ import os
 import json
 import yaml
 import shutil
+import time
 from jinja2 import Environment, FileSystemLoader
 from datetime import datetime
 import markdown
 import subprocess
 import hashlib
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, TimeRemainingColumn
-from rich.panel import Panel
-from rich.text import Text
-from rich.table import Table
 
+from gengallery.services.pipeline_types import OutputPath, SiteBuildResult
 from gengallery.services.site_htpasswd import (
     SITE_HTPASSWD_FILENAME,
     SiteHtpasswdError,
@@ -51,36 +49,18 @@ def neighbors_in_timeline(timeline: list, item_id: str) -> tuple:
     return None, None
 
 def load_config():
-    """Load and parse the YAML configuration file.
-
-    Returns:
-        dict: The parsed configuration data.
-    """
+    """Load and parse the YAML configuration file."""
     with open('config.yaml', 'r') as f:
         return yaml.safe_load(f)
 
 def load_galleries_data(output_path):
-    """Load the galleries metadata from JSON.
-
-    Args:
-        output_path (str): Path to the directory containing metadata.
-
-    Returns:
-        dict: The parsed galleries data.
-    """
+    """Load the galleries metadata from JSON."""
     galleries_json_path = os.path.join(output_path, 'metadata', 'galleries.json')
     with open(galleries_json_path, 'r') as f:
         return json.load(f)
 
 def markdown_filter(text):
-    """Convert markdown text to HTML.
-
-    Args:
-        text (str): Markdown-formatted text.
-
-    Returns:
-        str: HTML-formatted text.
-    """
+    """Convert markdown text to HTML."""
     return markdown.markdown(text)
 
 def generate_tailwind_css(quiet=False):
@@ -94,26 +74,20 @@ def generate_tailwind_css(quiet=False):
     ], check=True, capture_output=quiet)
 
 def generate_tag_hash(tag):
-    """Generate a short hash for a tag name.
-
-    Args:
-        tag (str): The tag to hash.
-
-    Returns:
-        str: A 12-character hexadecimal hash of the tag.
-    """
+    """Generate a short hash for a tag name."""
     return hashlib.sha256(tag.encode()).hexdigest()[:12]
 
-def generate_gallery_listing_pages(config, galleries_data, output_path, env, progress=None, task=None):
-    """Generate HTML pages for gallery listings, grouped by tags."""
-    if progress:
-        progress.update(task, description="[yellow]Generating tag listing pages")
-    
+def generate_gallery_listing_pages(config, galleries_data, output_path, env) -> dict[str, int]:
+    """
+    Generate HTML pages for gallery listings, grouped by tags.
+
+    Returns:
+        dict mapping tag name to gallery count.
+    """
     template = env.get_template('index.html.jinja')
     all_tags = set()
     tag_galleries = {}
 
-    # First pass - collect tags and galleries
     for gallery in galleries_data['galleries']:
         if gallery.get('unlisted', False):
             continue
@@ -133,23 +107,7 @@ def generate_gallery_listing_pages(config, galleries_data, output_path, env, pro
                 tag_galleries[tag] = []
             tag_galleries[tag].append(gallery)
 
-    if progress:
-        progress.update(task, total=len(tag_galleries))
-
-    # Add summary output
-    console.print("[yellow]📑 Tag pages:[/yellow]")
-    for tag, galleries in sorted(tag_galleries.items()):
-        console.print(f"[yellow]→[/yellow] [blue]{tag}[/blue] ({len(galleries)} galleries)")
-        
-        tag_hash = generate_tag_hash(tag)
-        output_file = os.path.join(output_path, 'public_html', f'{tag_hash}.html')
-        relative_path = os.path.join('public_html', f'{tag_hash}.html')
-        console.print(f"  [green]✓[/green] Index page: [blue]{relative_path}[/blue]")
-
     for tag, galleries in tag_galleries.items():
-        if progress:
-            progress.update(task, description=f"[yellow]Processing tag: {tag}")
-
         context = {
             'site_name': config['site_name'],
             'author': config['author'],
@@ -170,23 +128,14 @@ def generate_gallery_listing_pages(config, galleries_data, output_path, env, pro
         with open(output_file, 'w') as f:
             f.write(rendered_html)
 
-        # Copy the 'featured' page to index.html
         if tag == LISTING_FEATURED_TAG:
             index_file = os.path.join(output_path, 'public_html', 'index.html')
             shutil.copy2(output_file, index_file)
 
-        if progress and task:
-            progress.advance(task)
+    return {tag: len(gals) for tag, gals in tag_galleries.items()}
 
 def get_gallery_templates(env):
-    """Get all templates needed for gallery generation.
-    
-    Args:
-        env (Environment): Jinja2 environment
-        
-    Returns:
-        dict: Dictionary of template objects
-    """
+    """Get all templates needed for gallery generation."""
     return {
         'login': env.get_template('gallery_login.html.jinja'),
         'gallery': env.get_template('gallery.html.jinja'),
@@ -198,14 +147,7 @@ def get_gallery_templates(env):
     }
 
 def get_gallery_config(gallery):
-    """Determine gallery configuration and templates to use.
-    
-    Args:
-        gallery (dict): Gallery metadata
-        
-    Returns:
-        dict: Configuration including output filename and template types
-    """
+    """Determine gallery configuration and templates to use."""
     is_encrypted = gallery.get('encrypted', False)
     requires_login = bool(gallery.get('requires_login', False))
     
@@ -235,17 +177,7 @@ def get_gallery_config(gallery):
         }
 
 def get_protected_gallery_filename(gallery):
-    """Build deterministic obfuscated page filename for protected galleries.
-
-    Args:
-        gallery (dict): Gallery metadata containing storage token verifier hash.
-
-    Returns:
-        str: Obfuscated gallery page filename.
-
-    Raises:
-        ValueError: If storage token hash is missing or too short.
-    """
+    """Build deterministic obfuscated page filename for protected galleries."""
     verifier_hash = gallery.get('storage_token_hash_hex')
     if not verifier_hash or len(verifier_hash) < PROTECTED_PAGE_HASH_LENGTH:
         raise ValueError(
@@ -256,13 +188,7 @@ def get_protected_gallery_filename(gallery):
     return f'{protected_page_id}{PROTECTED_PAGE_EXTENSION}'
 
 def generate_login_page(templates, context, gallery_dir):
-    """Generate login page for protected galleries.
-    
-    Args:
-        templates (dict): Template objects
-        context (dict): Template context
-        gallery_dir (str): Output directory path
-    """
+    """Generate login page for protected galleries."""
     login_html = templates['login'].render(context)
     login_path = os.path.join(gallery_dir, 'index.html')
     os.makedirs(os.path.dirname(login_path), exist_ok=True)
@@ -270,15 +196,7 @@ def generate_login_page(templates, context, gallery_dir):
         f.write(login_html)
 
 def generate_gallery_index(templates, template_key, context, gallery_dir, output_filename):
-    """Generate main gallery index page.
-    
-    Args:
-        templates (dict): Template objects
-        template_key (str): Key for template to use
-        context (dict): Template context
-        gallery_dir (str): Output directory path
-        output_filename (str): Output filename
-    """
+    """Generate main gallery index page."""
     gallery_html = templates[template_key].render(context)
     output_path = os.path.join(gallery_dir, output_filename)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -286,12 +204,7 @@ def generate_gallery_index(templates, template_key, context, gallery_dir, output
         f.write(gallery_html)
 
 def remove_legacy_protected_gallery_page(gallery_dir, output_filename):
-    """Remove stale legacy protected page so direct legacy URL cannot be used.
-
-    Args:
-        gallery_dir (str): Gallery output directory path.
-        output_filename (str): Current protected gallery filename.
-    """
+    """Remove stale legacy protected page so direct legacy URL cannot be used."""
     if output_filename == LEGACY_PROTECTED_PAGE_FILENAME:
         return
 
@@ -300,15 +213,7 @@ def remove_legacy_protected_gallery_page(gallery_dir, output_filename):
         os.remove(legacy_page_path)
 
 def generate_image_pages(templates, template_key, gallery, output_path, context):
-    """Generate individual image pages for a gallery.
-    
-    Args:
-        templates (dict): Template objects
-        template_key (str): Key for template to use
-        gallery (dict): Gallery metadata
-        output_path (str): Base output path
-        context (dict): Base template context
-    """
+    """Generate individual image pages for a gallery."""
     timeline = build_gallery_media_timeline(gallery)
     for image in gallery['images']:
         nav_prev, nav_next = neighbors_in_timeline(timeline, image['id'])
@@ -355,50 +260,21 @@ def generate_video_pages(templates, template_key, gallery, output_path, context)
             f.write(rendered_html)
 
 
-def generate_gallery_pages(config, galleries_data, output_path, progress=None, task=None):
-    """Generate individual gallery and image pages.
+def generate_gallery_pages(config, galleries_data, output_path) -> list[dict]:
+    """
+    Generate individual gallery and image pages.
 
-    Args:
-        config (dict): Site configuration data
-        galleries_data (dict): Gallery metadata
-        output_path (str): Base output directory path
-        progress (Progress, optional): Progress bar instance
-        task (Task, optional): Progress task instance
+    Returns:
+        list of gallery summary dicts for each processed gallery.
     """
     env = Environment(loader=FileSystemLoader('templates'))
     env.filters['markdown'] = markdown_filter
     
     templates = get_gallery_templates(env)
+    gallery_summaries = []
 
     for gallery in galleries_data['galleries']:
         num_videos = len(gallery.get('videos') or [])
-        if progress:
-            progress.update(
-                task,
-                description=(
-                    f"[yellow]Gallery: [cyan]{gallery['title']}[/cyan] "
-                    f"({len(gallery['images'])} images, {num_videos} videos)"
-                ),
-            )
-        else:
-            # Build status icons
-            status_icons = []
-            if LISTING_FEATURED_TAG in gallery.get('tags', []):
-                status_icons.append("[yellow]⭐[/]")
-            if gallery.get('unlisted', False):
-                status_icons.append("[yellow]🕶[/]")
-            if gallery.get('requires_login', False):
-                status_icons.append("[red]🔑[/]")
-            if gallery.get('encrypted', False):
-                status_icons.append("[red]🔒[/]")
-            status_str = " ".join(status_icons)
-            
-            console.print(
-                f"[yellow]→[/yellow] [blue]{gallery['title']}[/blue] {status_str} "
-                f"({len(gallery['images'])} images, {num_videos} videos)"
-            )
-
-        # Set up gallery configuration and context
         gallery_config = get_gallery_config(gallery)
         context = {
             'site_name': config['site_name'],
@@ -409,16 +285,12 @@ def generate_gallery_pages(config, galleries_data, output_path, progress=None, t
             'media_timeline': build_gallery_media_timeline(gallery),
         }
 
-        # Create gallery directory
         gallery_dir = os.path.join(output_path, 'public_html', 'galleries', gallery['id'])
         os.makedirs(gallery_dir, exist_ok=True)
 
-        # Generate login page if needed
         if gallery_config['needs_login']:
             generate_login_page(templates, context, gallery_dir)
-            console.print(f"  [green]✓[/green] Login page: [blue]galleries/{gallery['id']}/index.html[/blue]")
 
-        # Generate gallery index
         generate_gallery_index(
             templates,
             gallery_config['gallery_template'],
@@ -428,9 +300,7 @@ def generate_gallery_pages(config, galleries_data, output_path, progress=None, t
         )
         if gallery_config['needs_login']:
             remove_legacy_protected_gallery_page(gallery_dir, gallery_config['output_filename'])
-        console.print(f"  [green]✓[/green] Index page: [blue]galleries/{gallery['id']}/{gallery_config['output_filename']}[/blue]")
 
-        # Generate image pages
         generate_image_pages(
             templates,
             gallery_config['image_template'],
@@ -438,7 +308,6 @@ def generate_gallery_pages(config, galleries_data, output_path, progress=None, t
             output_path,
             context
         )
-        console.print(f"  [green]✓ {len(gallery['images'])}[/green] image pages")
 
         if num_videos > 0:
             generate_video_pages(
@@ -448,21 +317,20 @@ def generate_gallery_pages(config, galleries_data, output_path, progress=None, t
                 output_path,
                 context,
             )
-            console.print(f"  [green]✓ {num_videos}[/green] video pages")
 
-        if progress and task:
-            progress.advance(task)
+        gallery_summaries.append({
+            'title': gallery.get('title', gallery['id']),
+            'image_count': len(gallery['images']),
+            'video_count': num_videos,
+            'is_featured': LISTING_FEATURED_TAG in gallery.get('tags', []),
+            'is_encrypted': gallery.get('encrypted', False),
+            'is_unlisted': gallery.get('unlisted', False),
+        })
 
-def generate_404_page(config, output_path, progress=None, task=None):
-    """Generate the 404 error page.
+    return gallery_summaries
 
-    Args:
-        config (dict): Site configuration data.
-        output_path (str): Base output directory path.
-    """
-    if progress:
-        progress.update(task, description="[yellow]Generating 404 page")
-    
+def generate_404_page(config, output_path):
+    """Generate the 404 error page."""
     env = Environment(loader=FileSystemLoader('templates'))
     template = env.get_template('404.html.jinja')
 
@@ -478,12 +346,13 @@ def generate_404_page(config, output_path, progress=None, task=None):
     with open(output_file, 'w') as f:
         f.write(rendered_html)
 
-def copy_static_files(config, output_path, quiet=False, progress=None, task=None):
-    """Copy static assets to the public directory."""
-    if progress:
-        progress.update(task, description="[yellow]Copying static files")
-    
-    # Create directories if they don't exist
+def copy_static_files(config, output_path) -> list[str]:
+    """
+    Copy static assets to the public directory.
+
+    Returns:
+        list of asset basenames successfully copied.
+    """
     os.makedirs(os.path.join(output_path, 'public_html', 'css'), exist_ok=True)
     os.makedirs(os.path.join(output_path, 'public_html', 'js'), exist_ok=True)
     os.makedirs(os.path.join(output_path, 'public_html', 'images'), exist_ok=True)
@@ -497,27 +366,16 @@ def copy_static_files(config, output_path, quiet=False, progress=None, task=None
         ('templates/images/encrypted-listing-cover.svg', 'public_html/images/encrypted-listing-cover.svg'),
     ]
 
+    copied = []
     for src_rel, dest_rel in files_to_copy:
-        src = os.path.join(src_rel)
         dest = os.path.join(output_path, dest_rel)
-        
-        if os.path.exists(src):
-            shutil.copy2(src, dest)
-            if not quiet:
-                console.print(f"[green]✓[/green] Copied [blue]{os.path.basename(src)}[/blue]")
-        else:
-            if not quiet:
-                console.print(f"[yellow]⚠[/yellow] {os.path.basename(src)} not found")
+        if os.path.exists(src_rel):
+            shutil.copy2(src_rel, dest)
+            copied.append(os.path.basename(src_rel))
+    return copied
 
-def get_directory_size(path):
-    """Calculate the total size of a directory in bytes.
-
-    Args:
-        path (str): Path to the directory
-
-    Returns:
-        tuple: (total_size, file_count)
-    """
+def get_directory_size(path) -> tuple[int, int]:
+    """Calculate the total size of a directory in bytes."""
     total_size = 0
     file_count = 0
     for dirpath, _, filenames in os.walk(path):
@@ -528,181 +386,107 @@ def get_directory_size(path):
                 file_count += 1
     return total_size, file_count
 
-def main():
-    """Main entry point for the static site generator."""
-    title = Text("Gallery Site Generator", style="bold cyan")
-    console.print(Panel(title, border_style="cyan"))
 
-    start_time = datetime.now()
-    stage_times = {}
-    errors = []
-    any_errors = False
+def run() -> SiteBuildResult:
+    """
+    Generate the full static site.
+
+    Produces no console output.
+
+    Returns:
+        SiteBuildResult with all data needed for the orchestrator to render output.
+    """
+    t0 = time.time()
+    errors: list[dict] = []
+
+    cfg = load_config()
+    galleries_data = load_galleries_data(cfg['output_path'])
+
+    env = Environment(loader=FileSystemLoader('templates'))
+    env.filters['markdown'] = markdown_filter
+    env.globals['generate_tag_hash'] = generate_tag_hash
+
+    tags = generate_gallery_listing_pages(cfg, galleries_data, cfg['output_path'], env)
+    gallery_summaries = generate_gallery_pages(cfg, galleries_data, cfg['output_path'])
+
+    generate_404_page(cfg, cfg['output_path'])
+    assets_copied: list[str] = []
 
     try:
-        # Stage 1: Load Configuration
-        console.print("\n[bold blue]Stage 1: Loading configuration...[/bold blue]")
-        stage_start = datetime.now()
-        config = load_config()
-        galleries_data = load_galleries_data(config['output_path'])
-        stage_times['load'] = datetime.now() - stage_start
-        console.print(f"[green]✓[/green] [dim]Configuration loaded in {stage_times['load'].total_seconds():.1f}s[/dim]")
-
-        # Show gallery summary
-        console.print("\n[yellow]🔍 Found galleries:[/yellow]")
-        for gallery in galleries_data['galleries']:
-            num_images = len(gallery['images'])
-            status_icons = []
-            if LISTING_FEATURED_TAG in gallery.get('tags', []):
-                status_icons.append("[yellow]⭐[/]")
-            if gallery.get('unlisted', False):
-                status_icons.append("[yellow]🕶[/]")
-            if gallery.get('requires_login', False):
-                status_icons.append("[red]🔑[/]")
-            if gallery.get('encrypted', False):
-                status_icons.append("[red]🔒[/]")
-            status_str = " ".join(status_icons)
-            console.print(f"  • [blue]{gallery['title']}[/] → [green]{num_images}[/] images {status_str}")
-
-        console.print(f"\n[green]✓ Total: {len(galleries_data['galleries'])} galleries[/]")
-
-        env = Environment(loader=FileSystemLoader('templates'))
-        env.filters['markdown'] = markdown_filter
-        env.globals['generate_tag_hash'] = generate_tag_hash
-
-        # Stage 2: Generate Tag Listings
-        console.print("\n[bold blue]Stage 2: Generating tag listings...[/bold blue]")
-        stage_start = datetime.now()
-        generate_gallery_listing_pages(config, galleries_data, config['output_path'], env)
-        stage_times['tags'] = datetime.now() - stage_start
-        console.print(f"[green]✓[/green] [dim]Completed in {stage_times['tags'].total_seconds():.1f}s[/dim]")
-
-        # Stage 3: Generate Gallery Pages
-        console.print("\n[bold blue]Stage 3: Generating gallery pages...[/bold blue]")
-        stage_start = datetime.now()
-        generate_gallery_pages(config, galleries_data, config['output_path'])
-        stage_times['galleries'] = datetime.now() - stage_start
-        console.print(f"[green]✓[/green] [dim]Completed in {stage_times['galleries'].total_seconds():.1f}s[/dim]")
-
-        # Stage 4: Finalizing site...
-        console.print("\n[bold blue]Stage 4: Finalizing site...[/bold blue]")
-        stage_start = datetime.now()
-        
-        try:
-            generate_tailwind_css(quiet=True)
-            console.print(f"[green]✓[/green] Generated [blue]Tailwind CSS[/blue]")
-        except Exception as e:
-            any_errors = True
-            errors.append({
-                'stage': 'Tailwind CSS Generation',
-                'type': type(e).__name__,
-                'error': str(e)
-            })
-            console.print("[red]✗[/red] Failed to generate Tailwind CSS")
-
-        generate_404_page(config, config['output_path'])
-        copy_static_files(config, config['output_path'], quiet=False)
-
-        try:
-            htpasswd_status = write_site_htpasswd_from_config(config, config['output_path'])
-            if htpasswd_status == "written":
-                console.print(
-                    f"[green]✓[/green] Wrote [blue]public_html/{SITE_HTPASSWD_FILENAME}[/blue] "
-                    "for site HTTP Basic auth"
-                )
-        except SiteHtpasswdError as e:
-            any_errors = True
-            errors.append({
-                'stage': 'Site .htpasswd',
-                'type': 'SiteHtpasswdError',
-                'error': str(e)
-            })
-            console.print(f"[red]✗[/red] Site .htpasswd: {e}")
-
-        stage_times['finalize'] = datetime.now() - stage_start
-        console.print(f"[green]✓[/green] [dim]Completed in {stage_times['finalize'].total_seconds():.1f}s[/dim]")
-
-        # Add protected gallery summary without secret output
-        protected_galleries = [g for g in galleries_data['galleries'] if g.get('requires_login', False)]
-        console.print(f"\n[bold blue]Protected Galleries ({len(protected_galleries)}):[/bold blue]")
-        if protected_galleries:
-            for gallery in protected_galleries:
-                mode = "Encrypted" if gallery.get('encrypted', False) else "Password-only"
-                console.print(f"[yellow]→[/yellow] [blue]{gallery['title']}[/blue]")
-                console.print(f"  [green]Mode:[/green] {mode}")
-        else:
-            console.print("[dim]No password protected galleries found[/dim]")
-
+        generate_tailwind_css(quiet=True)
+        assets_copied.append('tailwind.css')
     except Exception as e:
-        any_errors = True
-        errors.append({
-            'stage': 'General',
-            'type': type(e).__name__,
-            'error': str(e)
-        })
+        errors.append({'stage': 'Tailwind CSS', 'type': type(e).__name__, 'error': str(e)})
 
-    # Print Build Summary
-    duration = datetime.now() - start_time
-    console.print("\n[bold]Build Summary[/bold]")
-    console.print(f"Duration: {duration.total_seconds():.1f} seconds")
+    assets_copied.extend(copy_static_files(cfg, cfg['output_path']))
 
-    # Directory statistics
-    public_html_path = os.path.join(config['output_path'], 'public_html')
-    total_size, file_count = get_directory_size(public_html_path)
-    
-    # Output paths table
-    paths_table = Table(title="\nOutput Paths")
-    paths_table.add_column("Type", style="cyan")
-    paths_table.add_column("Path", style="yellow")
-    paths_table.add_column("Status", style="green")
-    paths_table.add_column("Files", style="blue", justify="right")
-    paths_table.add_column("Size", style="magenta", justify="right")
-    
-    paths = [
+    try:
+        htpasswd_status = write_site_htpasswd_from_config(cfg, cfg['output_path'])
+        if htpasswd_status == "written":
+            assets_copied.append(SITE_HTPASSWD_FILENAME)
+    except SiteHtpasswdError as e:
+        errors.append({'stage': 'Site .htpasswd', 'type': 'SiteHtpasswdError', 'error': str(e)})
+
+    public_html_path = os.path.join(cfg['output_path'], 'public_html')
+    output_paths: list[OutputPath] = []
+    path_specs = [
         ("Public HTML", public_html_path),
         ("Galleries", os.path.join(public_html_path, 'galleries')),
         ("CSS", os.path.join(public_html_path, 'css')),
         ("JavaScript", os.path.join(public_html_path, 'js')),
     ]
-    
-    for path_type, path in paths:
-        exists = os.path.exists(path)
-        status = "[green]✓[/]" if exists else "[red]✗[/]"
-        
-        if exists:
-            dir_size, file_count = get_directory_size(path)
-            size_str = f"{dir_size / (1024*1024):.1f} MB"
-            files_str = f"{file_count:,}"
+    for label, path in path_specs:
+        if os.path.exists(path):
+            size_bytes, file_count = get_directory_size(path)
         else:
-            size_str = "-"
-            files_str = "-"
-            
-        paths_table.add_row(
-            path_type,
-            path,
-            status,
-            files_str,
-            size_str
-        )
-    
-    console.print(paths_table)
+            size_bytes, file_count = 0, 0
+        output_paths.append(OutputPath(
+            label=label,
+            path=path,
+            file_count=file_count,
+            size_bytes=size_bytes,
+        ))
 
-    if any_errors:
-        error_table = Table(title="\nBuild Errors")
-        error_table.add_column("Stage", style="cyan")
-        error_table.add_column("Type", style="magenta")
-        error_table.add_column("Error", style="red", no_wrap=False)
-        
-        for error in errors:
-            error_table.add_row(
-                error['stage'],
-                error.get('type', 'Unknown'),
-                error.get('error', 'Unknown error')
-            )
-        
-        console.print(error_table)
-        console.print("\n[red]Build failed[/red]")
+    return SiteBuildResult(
+        galleries=gallery_summaries,
+        tags=tags,
+        assets_copied=assets_copied,
+        output_paths=output_paths,
+        errors=errors,
+        elapsed=time.time() - t0,
+    )
+
+
+def main():
+    """Entry point for standalone invocation."""
+    result = run()
+
+    for gallery in result.galleries:
+        flags = []
+        if gallery['is_featured']:
+            flags.append('⭐')
+        if gallery['is_encrypted']:
+            flags.append('🔒')
+        flag_str = ' '.join(flags)
+        img_str = f"{gallery['image_count']} img" if gallery['image_count'] else ''
+        vid_str = f"{gallery['video_count']} vid" if gallery['video_count'] else ''
+        media = '  ·  '.join(x for x in (img_str, vid_str) if x)
+        console.print(f"  [blue]{gallery['title']}[/] {flag_str}  {media}")
+
+    for tag, count in result.tags.items():
+        console.print(f"  Tag: {tag} ({count})")
+
+    console.print(f"  Assets: {', '.join(result.assets_copied)}")
+
+    for err in result.errors:
+        console.print(f"  [red]✗[/] {err['stage']}: {err['error']}")
+
+    elapsed_str = f"[dim]{result.elapsed:.2f}s[/]"
+    if result.errors:
+        console.print(f"  [red]Site generation completed with errors[/]  ·  {elapsed_str}")
     else:
-        console.print("\n[bold green]✨ Site generated successfully![/bold green]")
+        console.print(f"  [green]✨ Site generated successfully[/]  ·  {elapsed_str}")
+
 
 if __name__ == "__main__":
     main()
