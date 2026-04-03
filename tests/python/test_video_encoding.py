@@ -12,8 +12,8 @@ if BIN_PATH not in sys.path:
 
 from video_encoding import (  # noqa: E402
     AUDIO_BITRATE_AAC_BPS,
-    VIDEO_BITRATE_BPS_1080,
     VIDEO_BITRATE_BPS_720,
+    VIDEO_BITRATE_BPS_1080,
     VIDEO_MAX_DURATION_SECONDS,
     VIDEO_VBV_BUF_SIZE_MULTIPLIER,
     build_aac_audio_args,

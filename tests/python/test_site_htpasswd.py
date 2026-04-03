@@ -9,12 +9,12 @@ if BIN_PATH not in sys.path:
     sys.path.insert(0, BIN_PATH)
 
 from site_htpasswd import (  # noqa: E402
-    SiteHtpasswdError,
-    build_htpasswd_line,
-    write_site_htpasswd_from_config,
     CONFIG_SITE_PASSWORD_KEY,
     CONFIG_SITE_USERNAME_KEY,
     SITE_HTPASSWD_FILENAME,
+    SiteHtpasswdError,
+    build_htpasswd_line,
+    write_site_htpasswd_from_config,
 )
 
 
@@ -77,7 +77,7 @@ class TestWriteSiteHtpasswdFromConfig(unittest.TestCase):
             mock_build.assert_called_once_with("u", "p")
             path = os.path.join(tmp, "public_html", SITE_HTPASSWD_FILENAME)
             self.assertTrue(os.path.isfile(path))
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 self.assertEqual(f.read(), "u:h\n")
             mode = os.stat(path).st_mode & 0o777
             self.assertEqual(mode, 0o600)

@@ -1,0 +1,19 @@
+# All keys recognized by gengallery from gallery.yaml (gallery_processor, image_processor,
+# video_processor). Safe defaults for a new gallery; adjust or remove as needed.
+#
+# When encrypted: true, password must be a non-empty string or the pipeline will fail.
+
+title: "Example gallery"
+date: 2026-04-03
+location: ""
+description: >-
+  Gallery blurb shown on listing and gallery pages. Edit this text or clear it.
+tags:
+  - example
+  - featured
+content: >-
+  Optional body text for templates that render gallery.content (often markdown).
+encrypted: false
+password: ""
+unlisted: false
+cover: ""

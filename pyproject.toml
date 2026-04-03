@@ -1,5 +1,9 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "publicgallery"
+name = "gengallery"
 version = "0.1.0"
 description = "Static photo gallery build and encryption tooling."
 readme = "docs/README.md"
@@ -21,4 +25,79 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=9.0.0",
+    "build",
+    "ruff",
+    "mypy",
+    "pytest-cov",
+    "types-PyYAML",
 ]
+
+[project.scripts]
+gengallery = "gengallery.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# Extension list avoids shipping `__pycache__` if present under `assets/`.
+"gengallery" = [
+    "assets/**/*.yaml",
+    "assets/**/*.jinja",
+    "assets/**/*.css",
+    "assets/**/*.js",
+    "assets/**/*.txt",
+    "assets/**/*.svg",
+    "assets/**/*.ico",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/python"]
+pythonpath = ["src"]
+addopts = "-q --strict-markers"
+markers = [
+    "integration: hits real ffmpeg/rsync/network or large fixtures",
+]
+
+[tool.coverage.run]
+source = ["gengallery"]
+
+[tool.coverage.report]
+show_missing = true
+
+[tool.ruff]
+target-version = "py311"
+src = ["src", "tests/python"]
+line-length = 100
+extend-exclude = [
+    "src/gengallery/services/crypto_v1.py",
+    "src/gengallery/services/envelope_v1.py",
+    "src/gengallery/services/video_encoding.py",
+    "src/gengallery/services/site_htpasswd.py",
+    "src/gengallery/services/image_processor.py",
+    "src/gengallery/services/video_processor.py",
+    "src/gengallery/services/gallery_processor.py",
+    "src/gengallery/services/generator.py",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "src"
+packages = ["gengallery"]
+warn_unused_configs = true
+namespace_packages = true
+
+[[tool.mypy.overrides]]
+module = [
+    "gengallery.services.crypto_v1",
+    "gengallery.services.envelope_v1",
+    "gengallery.services.video_encoding",
+    "gengallery.services.site_htpasswd",
+    "gengallery.services.image_processor",
+    "gengallery.services.video_processor",
+    "gengallery.services.gallery_processor",
+    "gengallery.services.generator",
+]
+ignore_errors = true

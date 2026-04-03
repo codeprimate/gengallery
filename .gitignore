@@ -1,7 +1,47 @@
+# --- Local / secrets (never commit) ---
 config.yaml
-*/**/.DS_Store
+
+# --- Virtual environments ---
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# --- Python bytecode & caches ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# --- Packaging & editable installs (setuptools / uv / build) ---
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# --- Tests & quality tools ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# --- macOS ---
 .DS_Store
+.AppleDouble
+.LSOverride
+
+# --- Project output & scratch ---
+# Site generator output (default config uses ./export)
 export*/
-galleries*/*/**
 tmp/
+
+# --- Frontend (if used for templates/tooling) ---
 node_modules/
+
+# --- Gallery source trees: ignore files inside each gallery folder ---
+galleries*/*/**

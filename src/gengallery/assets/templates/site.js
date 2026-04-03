@@ -1,0 +1,1141 @@
+/**
+ * Handles gallery login functionality and password verification.
+ */
+const STORAGE_TOKEN_NAMESPACE = 'pge';
+const STORAGE_TOKEN_VERSION = 'v1';
+const STORAGE_TOKEN_KIND = 'storage_token';
+const STORAGE_TOKEN_SEPARATOR = '.';
+const STORAGE_TOKEN_PREFIX = `${STORAGE_TOKEN_NAMESPACE}${STORAGE_TOKEN_SEPARATOR}${STORAGE_TOKEN_VERSION}${STORAGE_TOKEN_SEPARATOR}${STORAGE_TOKEN_KIND}${STORAGE_TOKEN_SEPARATOR}`;
+const LEGACY_PRIVATE_ID_PREFIX = 'gallery_';
+const LEGACY_STORAGE_TOKEN_PREFIXES = [
+    'pge.storage_token.',
+    'storage_token.',
+    'storage_token_'
+];
+const DIAGNOSTIC_SUPPRESSION_NOTICE = 'Further runtime diagnostics suppressed';
+const PROTECTED_GALLERY_PAGE = 'gallery.html';
+const STORAGE_TOKEN_INFO_PREFIX = 'pge/v1/storage_token:';
+const IMAGE_KEY_INFO = 'pge/v1/key:image';
+const METADATA_KEY_INFO = 'pge/v1/key:metadata';
+const DERIVED_KEY_LENGTH_BYTES = 32;
+const MAX_LOGIN_DIAGNOSTIC_LOGS = 3;
+
+function utf8Bytes(value) {
+    return new TextEncoder().encode(value);
+}
+
+function buildStorageTokenKey(galleryId) {
+    return `${STORAGE_TOKEN_PREFIX}${galleryId}`;
+}
+
+function resolveProtectedGalleryPage(candidatePage) {
+    if (typeof candidatePage !== 'string') {
+        return PROTECTED_GALLERY_PAGE;
+    }
+
+    const normalizedPage = candidatePage.trim();
+    if (normalizedPage.length === 0) {
+        return PROTECTED_GALLERY_PAGE;
+    }
+
+    return normalizedPage;
+}
+
+function getLegacyStorageKeysForGallery(galleryId) {
+    const keys = [`${LEGACY_PRIVATE_ID_PREFIX}${galleryId}_private_id`];
+    for (const prefix of LEGACY_STORAGE_TOKEN_PREFIXES) {
+        keys.push(`${prefix}${galleryId}`);
+    }
+    return keys;
+}
+
+function clearStorageKeysForGallery(storage, galleryId) {
+    storage.removeItem(buildStorageTokenKey(galleryId));
+    for (const staleKey of getLegacyStorageKeysForGallery(galleryId)) {
+        storage.removeItem(staleKey);
+    }
+}
+
+function logSafeDiagnostic(category, details = {}) {
+    const safeDetails = {
+        category,
+        ...details
+    };
+    console.warn('Encrypted runtime diagnostic', safeDetails);
+}
+
+function bytesToHex(bytes) {
+    return Array.from(bytes).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function bytesToBase64url(bytes) {
+    const binary = String.fromCharCode(...bytes);
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function base64urlToBytes(value) {
+    const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+    const padding = '='.repeat((4 - (normalized.length % 4)) % 4);
+    const binary = atob(normalized + padding);
+    return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
+async function sha256Bytes(inputBytes) {
+    const digest = await crypto.subtle.digest('SHA-256', inputBytes);
+    return new Uint8Array(digest);
+}
+
+async function hkdfSha256(ikmBytes, saltBytes, infoBytes, lengthBytes) {
+    const keyMaterial = await crypto.subtle.importKey('raw', ikmBytes, 'HKDF', false, ['deriveBits']);
+    const derivedBits = await crypto.subtle.deriveBits(
+        {
+            name: 'HKDF',
+            hash: 'SHA-256',
+            salt: saltBytes,
+            info: infoBytes
+        },
+        keyMaterial,
+        lengthBytes * 8
+    );
+    return new Uint8Array(derivedBits);
+}
+
+async function deriveStorageTokenBytes(password, galleryId) {
+    const saltBytes = utf8Bytes(galleryId);
+    const infoBytes = utf8Bytes(`${STORAGE_TOKEN_INFO_PREFIX}${galleryId}`);
+    return hkdfSha256(utf8Bytes(password), saltBytes, infoBytes, DERIVED_KEY_LENGTH_BYTES);
+}
+
+async function deriveImageKeyBytes(storageTokenBytes, galleryId) {
+    const saltBytes = utf8Bytes(galleryId);
+    return hkdfSha256(storageTokenBytes, saltBytes, utf8Bytes(IMAGE_KEY_INFO), DERIVED_KEY_LENGTH_BYTES);
+}
+
+async function deriveMetadataKeyBytes(storageTokenBytes, galleryId) {
+    const saltBytes = utf8Bytes(galleryId);
+    return hkdfSha256(storageTokenBytes, saltBytes, utf8Bytes(METADATA_KEY_INFO), DERIVED_KEY_LENGTH_BYTES);
+}
+
+class GalleryLogin {
+    /**
+     * @param {string} galleryId - Unique identifier for the gallery
+     * @param {string} storageTokenHashHex - Hash of the storage token for verification
+     */
+    constructor(galleryId, storageTokenHashHex, options = {}) {
+        this.galleryId = galleryId;
+        this.storageTokenHashHex = storageTokenHashHex;
+        this.manifestUrl = options.manifestUrl || '';
+        this.saltB64 = options.saltB64 || '';
+        this.protectedPage = resolveProtectedGalleryPage(options.protectedPage);
+        this.loadingState = document.getElementById('loadingState');
+        this.loginForm = document.getElementById('loginForm');
+        this.passwordInput = document.getElementById('password');
+        this.submitButton = document.getElementById('submitButton');
+        this.errorMessage = document.getElementById('errorMessage');
+        this.diagnosticLogCount = 0;
+
+        this.init();
+    }
+
+    /**
+     * Initializes the login form and checks for saved credentials.
+     * @returns {Promise<void>}
+     */
+    async init() {
+        this.clearStaleCredentialKeys();
+        const hasValidCredentials = await this.checkSavedCredentials();
+        if (!hasValidCredentials) {
+            this.loadingState.classList.add('hidden');
+            this.loginForm.classList.remove('hidden');
+            this.passwordInput.focus();
+        }
+
+        this.passwordInput.addEventListener('input', () => {
+            this.submitButton.disabled = this.passwordInput.value.length === 0;
+        });
+
+        this.loginForm.addEventListener('submit', this.handleSubmit.bind(this));
+    }
+
+    async deriveCandidateStorageToken(password) {
+        const storageTokenBytes = await deriveStorageTokenBytes(password, this.galleryId);
+        return bytesToBase64url(storageTokenBytes);
+    }
+
+    /**
+     * Retrieves the current URL hash fragment.
+     * @returns {string} URL hash fragment
+     */
+    getHashFromUrl() {
+        return window.location.hash;
+    }
+
+    /**
+     * Redirects to the gallery page and preserves hash fragment.
+     */
+    redirectToGallery() {
+        const hash = this.getHashFromUrl();
+        window.location.href = `./${this.protectedPage}${hash}`;
+    }
+
+    /**
+     * Saves the storage token to local storage.
+     * @param {string} storageToken - Storage token to save
+     */
+    saveStorageToken(storageToken) {
+        localStorage.setItem(buildStorageTokenKey(this.galleryId), storageToken);
+    }
+
+    /**
+     * Retrieves the saved storage token from local storage.
+     * @returns {string|null} Saved storage token or null if not found
+     */
+    getSavedStorageToken() {
+        return localStorage.getItem(buildStorageTokenKey(this.galleryId));
+    }
+
+    /**
+     * Removes legacy storage keys from pre-v1 login model.
+     */
+    clearStaleCredentialKeys() {
+        const staleKeys = getLegacyStorageKeysForGallery(this.galleryId);
+        for (const staleKey of staleKeys) {
+            if (staleKey !== buildStorageTokenKey(this.galleryId)) {
+                localStorage.removeItem(staleKey);
+            }
+        }
+    }
+
+    logDiagnostic(category, details = {}) {
+        if (this.diagnosticLogCount >= MAX_LOGIN_DIAGNOSTIC_LOGS) {
+            return;
+        }
+        logSafeDiagnostic(category, { galleryId: this.galleryId, ...details });
+        this.diagnosticLogCount += 1;
+        if (this.diagnosticLogCount === MAX_LOGIN_DIAGNOSTIC_LOGS) {
+            console.warn(DIAGNOSTIC_SUPPRESSION_NOTICE, { category });
+        }
+    }
+
+    /**
+     * Checks for saved credentials and validates them.
+     * @returns {Promise<boolean>} True if valid credentials exist
+     */
+    async checkSavedCredentials() {
+        const savedStorageToken = this.getSavedStorageToken();
+        if (savedStorageToken) {
+            try {
+                const savedStorageTokenBytes = base64urlToBytes(savedStorageToken);
+                const savedStorageTokenHash = bytesToHex(await sha256Bytes(savedStorageTokenBytes));
+                if (savedStorageTokenHash === this.storageTokenHashHex) {
+                    this.redirectToGallery();
+                    return true;
+                }
+            } catch (error) {
+                localStorage.removeItem(buildStorageTokenKey(this.galleryId));
+                this.logDiagnostic('ERR_STORED_TOKEN_INVALID', { flow: 'auto-login' });
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Handles form submission and password verification.
+     * @param {Event} e - Form submission event
+     * @returns {Promise<void>}
+     */
+    async handleSubmit(e) {
+        e.preventDefault();
+        const password = this.passwordInput.value;
+
+        try {
+            const assertedStorageToken = await this.deriveCandidateStorageToken(password);
+            const assertedStorageTokenBytes = base64urlToBytes(assertedStorageToken);
+            const assertedStorageTokenHash = bytesToHex(await sha256Bytes(assertedStorageTokenBytes));
+
+            if (assertedStorageTokenHash === this.storageTokenHashHex) {
+                this.saveStorageToken(assertedStorageToken);
+                this.redirectToGallery();
+            } else {
+                this.errorMessage.textContent = 'Incorrect password. Please try again.';
+                this.passwordInput.value = '';
+                this.errorMessage.classList.remove('hidden');
+            }
+        } catch (error) {
+            this.logDiagnostic('ERR_PASSWORD_VERIFICATION_FAILED', { flow: 'submit' });
+            this.errorMessage.textContent = 'An error occurred. Please try again.';
+            this.errorMessage.classList.remove('hidden');
+        }
+    }
+}
+
+/**
+ * Manages the gallery lock/unlock UI and functionality.
+ */
+class GalleryLock {
+    /**
+     * @param {string} galleryId - Unique identifier for the gallery
+     */
+    constructor(galleryId) {
+        this.galleryId = galleryId;
+        this.lockIcon = document.getElementById('lockIcon');
+        this.openLock = this.lockIcon.querySelector('.open-lock');
+        this.closedLock = this.lockIcon.querySelector('.closed-lock');
+
+        // Find any active EncryptedGallery instance
+        this.encryptedGallery = window._encryptedGallery;
+
+        this.init();
+    }
+
+    /**
+     * Initializes event listeners for the lock icon.
+     */
+    init() {
+        this.lockIcon.addEventListener('mouseover', this.showClosedLock.bind(this));
+        this.lockIcon.addEventListener('mouseout', this.showOpenLock.bind(this));
+        this.lockIcon.addEventListener('click', this.handleLockClick.bind(this));
+    }
+
+    /**
+     * Shows the closed lock icon state.
+     */
+    showClosedLock() {
+        this.openLock.classList.add('hidden');
+        this.closedLock.classList.remove('hidden');
+    }
+
+    /**
+     * Shows the open lock icon state.
+     */
+    showOpenLock() {
+        this.openLock.classList.remove('hidden');
+        this.closedLock.classList.add('hidden');
+    }
+
+    /**
+     * Handles lock icon click event, clearing credentials and redirecting.
+     * @param {Event} event - Click event
+     */
+    handleLockClick(event) {
+        event.preventDefault();
+
+        // Clean up encrypted gallery if it exists
+        if (this.encryptedGallery) {
+            this.encryptedGallery.cleanup();
+            window._encryptedGallery = null;
+        }
+
+        // Clear all sensitive data from localStorage
+        clearStorageKeysForGallery(localStorage, this.galleryId);
+
+        // Clear any sensitive data from memory
+        // Force garbage collection hints on sensitive data
+        if (window.gc) {
+            window.gc();
+        }
+
+        // Redirect to login page
+        window.location.href = `./index.html`;
+    }
+}
+
+/**
+ * Envelope-v1 parsing helper.
+ */
+class EnvelopeV1 {
+    static MAGIC = 'PGE1';
+    static FORMAT_VERSION = 1;
+    static CRYPTO_SUITE_AES_256_GCM = 1;
+    static NONCE_LENGTH_BYTES = 12;
+    static MIN_TAG_LENGTH_BYTES = 16;
+
+    /**
+     * @param {ArrayBuffer} buffer
+     * @returns {{nonce: Uint8Array, ciphertextWithTag: Uint8Array, plaintextHeaderLength: number}}
+     */
+    static parse(buffer) {
+        const bytes = new Uint8Array(buffer);
+        if (bytes.length < 12 + this.NONCE_LENGTH_BYTES + this.MIN_TAG_LENGTH_BYTES) {
+            throw new Error('ERR_MANIFEST_INVALID');
+        }
+
+        const magic = String.fromCharCode(...bytes.slice(0, 4));
+        if (magic !== this.MAGIC) {
+            throw new Error('ERR_MANIFEST_INVALID');
+        }
+
+        const formatVersion = bytes[4];
+        const cryptoSuite = bytes[5];
+        if (formatVersion !== this.FORMAT_VERSION || cryptoSuite !== this.CRYPTO_SUITE_AES_256_GCM) {
+            throw new Error('ERR_UNSUPPORTED_ENVELOPE_VERSION');
+        }
+
+        const headerLength = (bytes[8] << 24) | (bytes[9] << 16) | (bytes[10] << 8) | bytes[11];
+        const nonceStart = 12 + headerLength;
+        const nonceEnd = nonceStart + this.NONCE_LENGTH_BYTES;
+        if (nonceEnd > bytes.length) {
+            throw new Error('ERR_MANIFEST_INVALID');
+        }
+
+        const ciphertextWithTag = bytes.slice(nonceEnd);
+        if (ciphertextWithTag.length < this.MIN_TAG_LENGTH_BYTES) {
+            throw new Error('ERR_DECRYPT_AUTH_FAILED');
+        }
+
+        return {
+            nonce: bytes.slice(nonceStart, nonceEnd),
+            ciphertextWithTag,
+            plaintextHeaderLength: headerLength
+        };
+    }
+}
+
+/**
+ * Bounded concurrency queue for decrypt jobs.
+ */
+class DecryptQueue {
+    constructor(maxConcurrent = 3) {
+        this.maxConcurrent = Math.max(1, maxConcurrent);
+        this.inFlight = 0;
+        this.pending = [];
+    }
+
+    enqueue(job) {
+        return new Promise((resolve, reject) => {
+            this.pending.push({ job, resolve, reject });
+            this.process();
+        });
+    }
+
+    process() {
+        while (this.inFlight < this.maxConcurrent && this.pending.length > 0) {
+            const next = this.pending.shift();
+            this.inFlight += 1;
+            Promise.resolve()
+                .then(next.job)
+                .then(next.resolve)
+                .catch(next.reject)
+                .finally(() => {
+                    this.inFlight -= 1;
+                    this.process();
+                });
+        }
+    }
+}
+
+/**
+ * Object URL cache with bounded size and revocation.
+ */
+class ObjectUrlCache {
+    constructor(maxEntries = 10) {
+        this.maxEntries = Math.max(1, maxEntries);
+        this.entries = new Map(); // key -> { objectUrl, ts }
+    }
+
+    has(key) {
+        return this.entries.has(key);
+    }
+
+    get(key) {
+        const entry = this.entries.get(key);
+        if (!entry) return null;
+        entry.ts = Date.now();
+        return entry.objectUrl;
+    }
+
+    set(key, blob) {
+        const existing = this.entries.get(key);
+        if (existing) {
+            URL.revokeObjectURL(existing.objectUrl);
+        }
+        const objectUrl = URL.createObjectURL(blob);
+        this.entries.set(key, { objectUrl, ts: Date.now() });
+        return objectUrl;
+    }
+
+    revoke(key) {
+        const entry = this.entries.get(key);
+        if (!entry) return;
+        URL.revokeObjectURL(entry.objectUrl);
+        this.entries.delete(key);
+    }
+
+    revokeAll() {
+        for (const entry of this.entries.values()) {
+            URL.revokeObjectURL(entry.objectUrl);
+        }
+        this.entries.clear();
+    }
+
+    evictInvisible(visibleKeys) {
+        if (this.entries.size <= this.maxEntries) return;
+        const candidates = Array.from(this.entries.entries())
+            .filter(([key]) => !visibleKeys.has(key))
+            .sort((a, b) => a[1].ts - b[1].ts);
+        for (const [key] of candidates) {
+            if (this.entries.size <= this.maxEntries) break;
+            this.revoke(key);
+        }
+    }
+}
+
+const ENCRYPTED_VIDEO_PLAYBACK_CACHE_MAX_ENTRIES = 1;
+const VIDEO_DECRYPT_MAX_CONCURRENT = 1;
+const VIDEO_PLAYBACK_MIME = 'video/mp4';
+
+/**
+ * Decrypt envelope v1 payload to a Blob with the given MIME type.
+ */
+async function decryptEnvelopeToBlob(galleryId, storageToken, encryptedArrayBuffer, mimeType) {
+    const envelope = EnvelopeV1.parse(encryptedArrayBuffer);
+    const key = await deriveEncryptionParams(galleryId, storageToken);
+    const decrypted = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: envelope.nonce },
+        key,
+        envelope.ciphertextWithTag
+    );
+    return new Blob([decrypted], { type: mimeType });
+}
+
+/**
+ * Fetch URL and decrypt through a DecryptQueue.
+ */
+async function fetchDecryptBlobInQueue(queue, galleryId, storageToken, url, mimeType) {
+    return queue.enqueue(async () => {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('ERR_MANIFEST_INVALID');
+        if (!storageToken) {
+            throw new Error('ERR_BAD_PASSWORD_OR_TOKEN');
+        }
+        const encryptedData = await response.arrayBuffer();
+        try {
+            return await decryptEnvelopeToBlob(galleryId, storageToken, encryptedData, mimeType);
+        } catch (error) {
+            throw new Error('ERR_DECRYPT_AUTH_FAILED');
+        }
+    });
+}
+
+/**
+ * Encrypted video detail page: poster from decrypted thumb, playback decrypt on first play.
+ */
+class EncryptedVideoPage {
+    /**
+     * @param {string} galleryId
+     * @param {Object} options
+     */
+    constructor(galleryId, options = {}) {
+        this.galleryId = galleryId;
+        this.storageToken = localStorage.getItem(buildStorageTokenKey(galleryId));
+        this.video = document.querySelector(options.videoSelector || '#encryptedVideo');
+        this.overlay = document.querySelector(options.overlaySelector || '#encryptedVideoOverlay');
+        this.manifestUrl = options.manifestUrl || '';
+        this.playbackCache = new ObjectUrlCache(ENCRYPTED_VIDEO_PLAYBACK_CACHE_MAX_ENTRIES);
+        this.videoDecryptQueue = new DecryptQueue(VIDEO_DECRYPT_MAX_CONCURRENT);
+        this.metadataCache = new Map();
+        this.metadataKeyPromise = null;
+        this._playbackLoaded = false;
+        this._posterObjectUrl = null;
+        this.errorLogCount = 0;
+        this.maxErrorLogs = 5;
+        this._cleanedUp = false;
+        this.init();
+        window.addEventListener('pagehide', () => this.cleanup());
+        window.addEventListener('unload', () => this.cleanup());
+    }
+
+    async init() {
+        if (!this.video || !this.storageToken) {
+            return;
+        }
+        try {
+            if (this.overlay) this.overlay.style.display = 'flex';
+            const thumbUrl = this.video.dataset.encryptedThumbnailUrl;
+            if (thumbUrl) {
+                const thumbBlob = await fetchDecryptBlobInQueue(
+                    this.videoDecryptQueue,
+                    this.galleryId,
+                    this.storageToken,
+                    thumbUrl,
+                    'image/jpeg'
+                );
+                this._posterObjectUrl = URL.createObjectURL(thumbBlob);
+                this.video.poster = this._posterObjectUrl;
+            }
+            await this.hydrateMetadata();
+            if (this.overlay) this.overlay.style.display = 'none';
+        } catch (error) {
+            this.logError('ERR_VIDEO_POSTER_DECRYPT', { galleryId: this.galleryId });
+            if (this.overlay) {
+                this.overlay.style.display = 'flex';
+                this.overlay.innerHTML = '<div class="text-red-600">Decryption failed</div>';
+            }
+        }
+
+        this.video.addEventListener('play', (e) => this.onPlay(e));
+    }
+
+    async onPlay(e) {
+        if (this._playbackLoaded) {
+            return;
+        }
+        e.preventDefault();
+        this.video.pause();
+        const playUrl = this.video.dataset.encryptedPlaybackUrl;
+        if (!playUrl) return;
+        if (this.overlay) this.overlay.style.display = 'flex';
+        try {
+            const blob = await fetchDecryptBlobInQueue(
+                this.videoDecryptQueue,
+                this.galleryId,
+                this.storageToken,
+                playUrl,
+                VIDEO_PLAYBACK_MIME
+            );
+            const objectUrl = this.playbackCache.set(playUrl, blob);
+            this.video.src = objectUrl;
+            this._playbackLoaded = true;
+            if (this.overlay) this.overlay.style.display = 'none';
+            await this.video.play();
+        } catch (error) {
+            this.logError('ERR_VIDEO_PLAYBACK_DECRYPT', { galleryId: this.galleryId, assetUrl: playUrl });
+            if (this.overlay) {
+                this.overlay.style.display = 'flex';
+                this.overlay.innerHTML = '<div class="text-red-600">Decryption failed</div>';
+            }
+        }
+    }
+
+    async getMetadataKey() {
+        if (!this.storageToken) {
+            throw new Error('ERR_BAD_PASSWORD_OR_TOKEN');
+        }
+        if (!this.metadataKeyPromise) {
+            this.metadataKeyPromise = (async () => {
+                const storageTokenBytes = base64urlToBytes(this.storageToken);
+                const metadataKeyBytes = await deriveMetadataKeyBytes(storageTokenBytes, this.galleryId);
+                return crypto.subtle.importKey(
+                    'raw',
+                    metadataKeyBytes,
+                    { name: 'AES-GCM' },
+                    false,
+                    ['decrypt']
+                );
+            })();
+        }
+        return this.metadataKeyPromise;
+    }
+
+    async fetchAndDecryptMetadata(metadataUrl) {
+        if (!metadataUrl) return null;
+        if (this.metadataCache.has(metadataUrl)) {
+            return this.metadataCache.get(metadataUrl);
+        }
+        const response = await fetch(metadataUrl);
+        if (!response.ok) throw new Error('ERR_MANIFEST_INVALID');
+        const encryptedData = await response.arrayBuffer();
+        const envelope = EnvelopeV1.parse(encryptedData);
+        const metadataKey = await this.getMetadataKey();
+        let decrypted;
+        try {
+            decrypted = await crypto.subtle.decrypt(
+                { name: 'AES-GCM', iv: envelope.nonce },
+                metadataKey,
+                envelope.ciphertextWithTag
+            );
+        } catch (error) {
+            throw new Error('ERR_DECRYPT_AUTH_FAILED');
+        }
+        const metadata = JSON.parse(new TextDecoder().decode(decrypted));
+        this.metadataCache.set(metadataUrl, metadata);
+        return metadata;
+    }
+
+    resolveMetadataField(metadata, fieldName) {
+        if (!metadata || !fieldName) return '';
+        if (fieldName === 'DateTimeOriginal') {
+            return metadata.exif && metadata.exif.DateTimeOriginal ? metadata.exif.DateTimeOriginal : '';
+        }
+        const value = metadata[fieldName];
+        return typeof value === 'string' ? value : '';
+    }
+
+    applyMetadataToScope(scope, metadata) {
+        const fields = scope.querySelectorAll('.encrypted-meta-field');
+        for (const fieldElement of fields) {
+            const fieldName = fieldElement.dataset.field || '';
+            const fallback = fieldElement.dataset.fallback || '';
+            const value = this.resolveMetadataField(metadata, fieldName);
+            fieldElement.textContent = value || fallback;
+        }
+    }
+
+    async hydrateMetadata() {
+        const metadataUrl = this.video.dataset.encryptedMetadataUrl;
+        if (!metadataUrl) return;
+        try {
+            const metadata = await this.fetchAndDecryptMetadata(metadataUrl);
+            const scopes = document.querySelectorAll('[data-encrypted-metadata-url]');
+            for (const scope of scopes) {
+                if (scope.getAttribute('data-encrypted-metadata-url') === metadataUrl) {
+                    this.applyMetadataToScope(scope, metadata);
+                }
+            }
+            if (metadata && metadata.filename && document.title.startsWith('Private Video')) {
+                document.title = `${metadata.filename} - Private Gallery`;
+            }
+        } catch (error) {
+            this.logError('ERR_VIDEO_METADATA_DECRYPT', { galleryId: this.galleryId, assetUrl: metadataUrl });
+        }
+    }
+
+    cleanup() {
+        if (this._cleanedUp) return;
+        this._cleanedUp = true;
+        if (this._posterObjectUrl) {
+            URL.revokeObjectURL(this._posterObjectUrl);
+            this._posterObjectUrl = null;
+        }
+        this.playbackCache.revokeAll();
+        this.metadataCache.clear();
+        this.metadataKeyPromise = null;
+        this.storageToken = null;
+    }
+
+    logError(category, details = {}) {
+        if (this.errorLogCount < this.maxErrorLogs) {
+            logSafeDiagnostic(category, details);
+            this.errorLogCount += 1;
+            if (this.errorLogCount === this.maxErrorLogs) {
+                console.warn(DIAGNOSTIC_SUPPRESSION_NOTICE, { category });
+            }
+        }
+    }
+}
+
+/**
+ * Handles encrypted image loading and decryption in galleries.
+ */
+class EncryptedGallery {
+    /**
+     * @param {string} galleryId - Unique identifier for the gallery
+     * @param {Object} [options] - Configuration options
+     */
+    constructor(galleryId, options = {}) {
+        this.galleryId = galleryId;
+        this.storageToken = localStorage.getItem(buildStorageTokenKey(this.galleryId));
+        this.manifestUrl = options.manifestUrl || '';
+        this.options = {
+            placeholderSelector: options.placeholderSelector || '#encrypted-placeholder',
+            imageSelector: options.imageSelector || '.encrypted-image',
+            overlaySelector: options.overlaySelector || '.encrypted-overlay',
+            mode: options.mode || 'gallery',
+            maxBufferSize: options.maxBufferSize || 10, // Keep last 10 images in memory
+            maxConcurrentDecrypts: options.maxConcurrentDecrypts || 3
+        };
+
+        this.visibleImages = new Set();
+        this.objectUrlCache = new ObjectUrlCache(this.options.maxBufferSize);
+        this.decryptQueue = new DecryptQueue(this.options.maxConcurrentDecrypts);
+        this.failedImages = new Set();
+        this.errorLogCount = 0;
+        this.maxErrorLogs = 5;
+        this.metadataCache = new Map();
+        this.metadataKeyPromise = null;
+
+        if (this.options.mode === 'single') {
+            this.decryptSingleImage();
+        } else {
+            this.initIntersectionObserver();
+        }
+        
+        window.addEventListener('unload', () => this.cleanup());
+
+        // Add click handler for full image links
+        document.addEventListener('click', async (e) => {
+            const link = e.target.closest('.full-image-link');
+            if (link) {
+                e.preventDefault();
+                await this.handleFullImageClick(link);
+            }
+        });
+
+        // Store instance globally for access by GalleryLock
+        window._encryptedGallery = this;
+    }
+
+    /**
+     * Decrypts a single image for single image view mode.
+     * @returns {Promise<void>}
+     */
+    async decryptSingleImage() {
+        const mainImage = document.querySelector(this.options.imageSelector);
+        if (!mainImage) return;
+
+        try {
+            const overlay = mainImage.parentElement.querySelector(this.options.overlaySelector);
+            if (overlay) overlay.style.display = 'flex';
+
+            const url = mainImage.dataset.encryptedUrl;
+            const decryptedBlob = await this.fetchAndDecrypt(url);
+            
+            const objectUrl = this.objectUrlCache.set(url, decryptedBlob);
+            mainImage.src = objectUrl;
+            await this.hydrateMetadataForImage(mainImage);
+            if (overlay) overlay.style.display = 'none';
+
+            await this.decryptNavigationThumbnails();
+
+        } catch (error) {
+            this.logError('ERR_SINGLE_IMAGE_DECRYPT', { galleryId: this.galleryId });
+            const overlay = mainImage.parentElement.querySelector(this.options.overlaySelector);
+            if (overlay) {
+                overlay.innerHTML = '<div class="text-red-600">Decryption failed</div>';
+            }
+        }
+    }
+
+    /**
+     * Decrypts thumbnail images for navigation.
+     * @returns {Promise<void>}
+     */
+    async decryptNavigationThumbnails() {
+        const navThumbnails = document.querySelectorAll('.nav-thumbnail');
+        for (const thumb of navThumbnails) {
+            if (thumb.dataset.encryptedUrl) {
+                try {
+                    const url = thumb.dataset.encryptedUrl;
+                    const decryptedBlob = await this.fetchAndDecrypt(url);
+                    const objectUrl = this.objectUrlCache.set(url, decryptedBlob);
+                    thumb.src = objectUrl;
+                } catch (error) {
+                    this.logError('ERR_NAV_THUMBNAIL_DECRYPT', { galleryId: this.galleryId });
+                }
+            }
+        }
+    }
+
+    /**
+     * Initializes intersection observer for lazy loading images.
+     * @returns {Promise<void>}
+     */
+    async initIntersectionObserver() {
+        const options = {
+            root: null,
+            rootMargin: '50px',
+            threshold: 0.1
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    this.handleImageVisible(entry.target);
+                } else {
+                    this.handleImageHidden(entry.target);
+                }
+            });
+        }, options);
+
+        // Observe all encrypted images
+        document.querySelectorAll(this.options.imageSelector).forEach(img => {
+            observer.observe(img);
+        });
+    }
+
+    /**
+     * Validates that a blob contains valid image data
+     * @param {Blob} blob - The blob to validate
+     * @returns {Promise<boolean>}
+     */
+    async isValidImage(blob) {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+                const arr = new Uint8Array(reader.result).subarray(0, 16);
+                const header = Array.from(arr).map(x => x.toString(16).padStart(2, '0')).join('');
+                // Check for JPEG header (FF D8 FF)
+                const isValid = header.startsWith('ffd8ff');
+                resolve(isValid);
+            };
+            reader.onerror = () => resolve(false);
+            reader.readAsArrayBuffer(blob);
+        });
+    }
+
+    /**
+     * Handles image elements becoming visible in the viewport.
+     */
+    async handleImageVisible(img) {
+        const url = img.dataset.encryptedUrl;
+        if (!url || this.failedImages.has(url)) return;
+
+        // Track this image as visible
+        this.visibleImages.add(url);
+        
+        const overlay = img.parentElement.querySelector(this.options.overlaySelector);
+        if (overlay) overlay.style.display = 'flex';
+
+        try {
+            // Check if already decrypted
+            if (this.objectUrlCache.has(url)) {
+                img.src = this.objectUrlCache.get(url);
+                if (overlay) overlay.style.display = 'none';
+                return;
+            }
+
+            // Decrypt image
+            const decryptedBlob = await this.fetchAndDecrypt(url);
+            
+            if (!await this.isValidImage(decryptedBlob)) {
+                throw new Error('Invalid image data');
+            }
+
+            const objectUrl = this.objectUrlCache.set(url, decryptedBlob);
+            
+            img.src = objectUrl;
+            img.srcset = '';
+            await this.hydrateMetadataForImage(img);
+            
+            if (overlay) overlay.style.display = 'none';
+
+        } catch (error) {
+            this.logError('ERR_DECRYPT_OPERATION', { galleryId: this.galleryId, assetUrl: url });
+            this.failedImages.add(url);
+            
+            if (overlay) {
+                overlay.style.display = 'flex';
+                overlay.innerHTML = '<div class="text-red-600">Decryption failed</div>';
+            }
+            
+            if (img.src !== this.options.placeholderSelector) {
+                img.src = this.options.placeholderSelector;
+            }
+        }
+    }
+
+    /**
+     * Handles image elements leaving the viewport.
+     * @param {HTMLImageElement} img - Image element that left viewport
+     */
+    handleImageHidden(img) {
+        const url = img.dataset.encryptedUrl;
+        if (!url) return;
+
+        // Remove from visible set
+        this.visibleImages.delete(url);
+        
+        // Clean up excess images after a short delay
+        // (in case user is just quickly scrolling)
+        setTimeout(() => this.cleanupExcessImages(), 1000);
+    }
+
+    cleanupExcessImages() {
+        this.objectUrlCache.evictInvisible(this.visibleImages);
+    }
+
+    /**
+     * Fetches and decrypts an encrypted image.
+     */
+    async fetchAndDecrypt(url) {
+        return fetchDecryptBlobInQueue(
+            this.decryptQueue,
+            this.galleryId,
+            this.storageToken,
+            url,
+            'image/jpeg'
+        );
+    }
+
+    async getMetadataKey() {
+        if (!this.storageToken) {
+            throw new Error('ERR_BAD_PASSWORD_OR_TOKEN');
+        }
+        if (!this.metadataKeyPromise) {
+            this.metadataKeyPromise = (async () => {
+                const storageTokenBytes = base64urlToBytes(this.storageToken);
+                const metadataKeyBytes = await deriveMetadataKeyBytes(storageTokenBytes, this.galleryId);
+                return crypto.subtle.importKey(
+                    'raw',
+                    metadataKeyBytes,
+                    { name: 'AES-GCM' },
+                    false,
+                    ['decrypt']
+                );
+            })();
+        }
+        return this.metadataKeyPromise;
+    }
+
+    async fetchAndDecryptMetadata(metadataUrl) {
+        if (!metadataUrl) return null;
+        if (this.metadataCache.has(metadataUrl)) {
+            return this.metadataCache.get(metadataUrl);
+        }
+
+        const response = await fetch(metadataUrl);
+        if (!response.ok) throw new Error('ERR_MANIFEST_INVALID');
+        const encryptedData = await response.arrayBuffer();
+        const envelope = EnvelopeV1.parse(encryptedData);
+        const metadataKey = await this.getMetadataKey();
+
+        let decrypted;
+        try {
+            decrypted = await crypto.subtle.decrypt(
+                { name: 'AES-GCM', iv: envelope.nonce },
+                metadataKey,
+                envelope.ciphertextWithTag
+            );
+        } catch (error) {
+            throw new Error('ERR_DECRYPT_AUTH_FAILED');
+        }
+
+        const metadata = JSON.parse(new TextDecoder().decode(decrypted));
+        this.metadataCache.set(metadataUrl, metadata);
+        return metadata;
+    }
+
+    resolveMetadataField(metadata, fieldName) {
+        if (!metadata || !fieldName) return '';
+        if (fieldName === 'DateTimeOriginal') {
+            return metadata.exif && metadata.exif.DateTimeOriginal ? metadata.exif.DateTimeOriginal : '';
+        }
+        const value = metadata[fieldName];
+        return typeof value === 'string' ? value : '';
+    }
+
+    applyMetadataToScope(scope, metadata) {
+        const fields = scope.querySelectorAll('.encrypted-meta-field');
+        for (const fieldElement of fields) {
+            const fieldName = fieldElement.dataset.field || '';
+            const fallback = fieldElement.dataset.fallback || '';
+            const value = this.resolveMetadataField(metadata, fieldName);
+            fieldElement.textContent = value || fallback;
+        }
+    }
+
+    async hydrateMetadataForImage(img) {
+        const metadataUrl = img.dataset.encryptedMetadataUrl;
+        if (!metadataUrl) return;
+
+        try {
+            const metadata = await this.fetchAndDecryptMetadata(metadataUrl);
+            const scopes = document.querySelectorAll('[data-encrypted-metadata-url]');
+            for (const scope of scopes) {
+                if (scope.getAttribute('data-encrypted-metadata-url') === metadataUrl) {
+                    this.applyMetadataToScope(scope, metadata);
+                }
+            }
+
+            if (metadata && metadata.filename && document.title.startsWith('Private Image')) {
+                document.title = `${metadata.filename} - Private Gallery`;
+            }
+        } catch (error) {
+            this.logError('ERR_METADATA_DECRYPT', { galleryId: this.galleryId, assetUrl: metadataUrl });
+        }
+    }
+
+    /**
+     * Performs cleanup by revoking object URLs and clearing sensitive data.
+     */
+    cleanup() {
+        this.objectUrlCache.revokeAll();
+        this.visibleImages.clear();
+        this.failedImages.clear();
+
+        // Clear sensitive data
+        this.storageToken = null;
+        this.metadataCache.clear();
+        this.metadataKeyPromise = null;
+        
+        // Remove references to DOM elements
+        this.options = null;
+        this.objectUrlCache = null;
+        this.decryptQueue = null;
+    }
+
+    /**
+     * Handles error logging.
+     * @param {...any} args - Error arguments
+     */
+    logError(category, details = {}) {
+        if (this.errorLogCount < this.maxErrorLogs) {
+            logSafeDiagnostic(category, details);
+            this.errorLogCount++;
+            
+            if (this.errorLogCount === this.maxErrorLogs) {
+                console.warn(DIAGNOSTIC_SUPPRESSION_NOTICE, { category });
+            }
+        }
+    }
+
+    /**
+     * Handles full image click event.
+     * @param {Event} e - Click event
+     */
+    async handleFullImageClick(link) {
+        const img = link.querySelector(this.options.imageSelector);
+        if (!img) return;
+
+        const fullUrl = img.dataset.fullUrl;
+        if (!fullUrl) return;
+
+        try {
+            // Show loading state
+            const overlay = img.parentElement.querySelector(this.options.overlaySelector);
+            if (overlay) overlay.style.display = 'flex';
+
+            // Check if already decrypted
+            if (this.objectUrlCache.has(fullUrl)) {
+                window.open(this.objectUrlCache.get(fullUrl));
+                return;
+            }
+
+            // Decrypt full image
+            const decryptedBlob = await this.fetchAndDecrypt(fullUrl);
+            
+            if (!await this.isValidImage(decryptedBlob)) {
+                throw new Error('Invalid image data');
+            }
+
+            const objectUrl = this.objectUrlCache.set(fullUrl, decryptedBlob);
+            
+            // Open in new tab
+            window.open(objectUrl);
+
+        } catch (error) {
+            this.logError('ERR_FULL_IMAGE_DECRYPT', { galleryId: this.galleryId, assetUrl: fullUrl });
+            alert('Failed to load full image');
+        } finally {
+            const overlay = img.parentElement.querySelector(this.options.overlaySelector);
+            if (overlay) overlay.style.display = 'none';
+        }
+    }
+}
+
+/**
+ * Derives encryption parameters for decrypting gallery images.
+ * @param {string} galleryId - Gallery ID
+ * @param {string} storageToken - Storage token used as key material
+ * @returns {Promise<CryptoKey>}
+ */
+async function deriveEncryptionParams(galleryId, storageToken) {
+    const storageTokenBytes = base64urlToBytes(storageToken);
+    const imageKeyBytes = await deriveImageKeyBytes(storageTokenBytes, galleryId);
+    return crypto.subtle.importKey(
+        'raw',
+        imageKeyBytes,
+        { name: 'AES-GCM' },
+        false,
+        ['decrypt']
+    );
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        buildStorageTokenKey,
+        resolveProtectedGalleryPage,
+        getLegacyStorageKeysForGallery,
+        clearStorageKeysForGallery
+    };
+}
