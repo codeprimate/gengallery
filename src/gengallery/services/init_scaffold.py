@@ -22,8 +22,8 @@ MSG_INIT_CONFLICT_CONFIG = (
     "Remove it or choose an empty directory."
 )
 MSG_INIT_CONFLICT_GALLERIES = (
-    f"Cannot initialize here: {GALLERIES_DIRNAME!r} already exists "
-    "(file or directory). Remove it or choose an empty directory."
+    f"Cannot initialize here: {GALLERIES_DIRNAME!r} exists but is not a directory. "
+    "Remove it or choose a different path."
 )
 MSG_INIT_CONFLICT_TEMPLATES = (
     f"Cannot initialize here: {TEMPLATES_DIRNAME!r} already exists "
@@ -41,7 +41,8 @@ def _ensure_no_init_conflicts(target_root: Path) -> None:
         raise CliUserError(MSG_INIT_CONFLICT_CONFIG)
     galleries_path = target_root / GALLERIES_DIRNAME
     if galleries_path.exists() or galleries_path.is_symlink():
-        raise CliUserError(MSG_INIT_CONFLICT_GALLERIES)
+        if not galleries_path.is_dir():
+            raise CliUserError(MSG_INIT_CONFLICT_GALLERIES)
     templates_path = target_root / TEMPLATES_DIRNAME
     if templates_path.exists() or templates_path.is_symlink():
         raise CliUserError(MSG_INIT_CONFLICT_TEMPLATES)

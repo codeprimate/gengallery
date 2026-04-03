@@ -92,16 +92,19 @@ def test_init_cli_user_error_when_config_exists(
     assert exc.value.code == 1
 
 
-def test_init_stderr_mentions_conflict_when_galleries_exists(
+def test_init_succeeds_when_galleries_directory_already_exists(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (tmp_path / GALLERIES_DIRNAME).mkdir()
+    monkeypatch.setattr("gengallery.commands.init.run_npm_install", lambda _p: None)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sys, "argv", ["gengallery", "init"])
     with pytest.raises(SystemExit) as exc:
         main()
-    assert exc.value.code == 1
-    assert GALLERIES_DIRNAME in capsys.readouterr().err
+    assert exc.value.code == 0
+    gal = tmp_path / GALLERIES_DIRNAME / SCAFFOLD_EXAMPLE_GALLERY_DIRNAME
+    assert (gal / "gallery.yaml").is_file()
+    assert INIT_MSG_SUCCESS in capsys.readouterr().out
 
 
 def test_init_stderr_mentions_conflict_when_templates_exists(
@@ -123,8 +126,15 @@ def test_run_init_second_time_fails(tmp_path: Path) -> None:
     assert excinfo.value.message == MSG_INIT_CONFLICT_CONFIG
 
 
-def test_run_init_rejects_existing_galleries(tmp_path: Path) -> None:
+def test_run_init_allows_existing_galleries_directory(tmp_path: Path) -> None:
     (tmp_path / GALLERIES_DIRNAME).mkdir()
+    written = run_init(tmp_path)
+    assert written > 0
+    assert (tmp_path / CONFIG_FILENAME).is_file()
+
+
+def test_run_init_rejects_galleries_path_when_not_a_directory(tmp_path: Path) -> None:
+    (tmp_path / GALLERIES_DIRNAME).write_text("not a dir\n", encoding="utf-8")
     with pytest.raises(CliUserError) as excinfo:
         run_init(tmp_path)
     assert excinfo.value.message == MSG_INIT_CONFLICT_GALLERIES

@@ -1,11 +1,19 @@
-.PHONY: help install-dev build clean format lint typecheck test test-unit test-integration coverage check check-all
+PYTHON ?= python3
+
+.PHONY: help install install-dev build clean format lint typecheck test test-unit test-integration coverage check check-all
 
 help:
-	@echo "Targets: install-dev build clean format lint typecheck test test-unit test-integration coverage check check-all"
-	@echo "Requires uv: https://docs.astral.sh/uv/"
+	@echo "Targets: install install-dev build clean format lint typecheck test test-unit test-integration coverage check check-all"
+	@echo "install / install-dev: $(PYTHON) -m pip (active interpreter’s site-packages)"
+	@echo "Other targets use uv: https://docs.astral.sh/uv/"
 
+# Install gengallery into the current Python environment (system, venv, or user site).
+install:
+	$(PYTHON) -m pip install .
+
+# Editable install with dev extras (pytest, ruff, mypy, etc.).
 install-dev:
-	uv sync --extra dev
+	$(PYTHON) -m pip install -e ".[dev]"
 
 build:
 	uv run python -m build

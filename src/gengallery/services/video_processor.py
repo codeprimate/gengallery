@@ -31,6 +31,7 @@ from gengallery.services.envelope_v1 import encrypt_payload
 from gengallery.services.image_processor import (
     METADATA_BLOB_EXTENSION,
     METADATA_VARIANT_DIR,
+    clean_encrypted_variant_outputs,
     config,
     derive_encryption_params,
     encrypt_file,
@@ -481,8 +482,6 @@ def process_gallery_videos(gallery_name: str) -> tuple[int, int]:
         gallery_config = yaml.safe_load(f)
 
     if gallery_config.get("encrypted", False):
-        from image_processor import clean_encrypted_variant_outputs
-
         clean_encrypted_variant_outputs(gallery_name)
 
     videos = list_gallery_videos(gallery_path)
