@@ -14,11 +14,13 @@ The rest you do is your business.
 
 The **gengallery** command is the supported entrypoint (console script from this package). After dependencies are installed, run it via `uv run gengallery …` or activate your environment and run `gengallery` directly.
 
-1. **New project:** scaffold a directory (missing parents are created; existing `config.yaml`, `galleries/`, or `templates/` cause a **non-zero exit**—there is no `--force`):
+1. **New project:** scaffold a directory (missing parents are created; existing `config.yaml`, `package.json`, `galleries/`, or `templates/` cause a **non-zero exit**—there is no `--force`):
    ```bash
    uv sync --extra dev
    uv run gengallery init /path/to/my-gallery-site
    ```
+   `gengallery init` writes `package.json` and runs **`npm install`** in that directory so Tailwind is available for `gengallery update`. **Node.js and npm must be installed first** (see step 4).
+
    Then edit `config.yaml` and add content under `galleries/` as below.
 
 2. **Existing project:** copy `config.example.yaml` to `config.yaml` if you do not already have one, and adjust paths and settings.
@@ -28,20 +30,17 @@ The **gengallery** command is the supported entrypoint (console script from this
    uv sync --extra dev
    ```
 
-4. Install Node.js and npm:
+4. Install Node.js and npm (required before `gengallery init` or for manual `npm install` in an existing site):
    - Windows: Download and install from [nodejs.org](https://nodejs.org/)
    - macOS: `brew install node`
    - Linux: Use your package manager (e.g., `apt install nodejs npm`)
 
-5. Install Tailwind CSS dependencies:
-   ```bash
-   npm install
-   ```
-
-6. For SSH deployment, ensure rsync is installed:
+5. For SSH deployment, ensure rsync is installed:
    - Windows: Install via WSL or Cygwin
    - macOS: Included by default
    - Linux: `apt install rsync` or equivalent
+
+If you add a project without using `gengallery init`, run **`npm install`** in the project root (same `package.json` layout as the scaffold) before `gengallery update`.
 
 ## Development Setup (uv)
 

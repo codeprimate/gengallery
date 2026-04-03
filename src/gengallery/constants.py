@@ -1,5 +1,8 @@
 """Shared literals for CLI, services, and validation (single source of truth)."""
 
+# CLI identity (console script name and help banner)
+CLI_APP_NAME = "gengallery"
+
 # Command names (CLI subcommands)
 CMD_INIT = "init"
 CMD_UPDATE = "update"
@@ -12,6 +15,7 @@ PUSH_PROVIDER_SSH = "ssh"
 
 # Project layout
 CONFIG_FILENAME = "config.yaml"
+PACKAGE_JSON_FILENAME = "package.json"
 GALLERIES_DIRNAME = "galleries"
 TEMPLATES_DIRNAME = "templates"
 PUBLIC_HTML_SEGMENT = "public_html"

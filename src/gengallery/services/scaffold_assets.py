@@ -64,12 +64,15 @@ def iter_scaffold_files() -> Iterable[tuple[str, Traversable]]:
     yield from _walk_files(templates_root, TEMPLATES_DIRNAME)
 
 
-def materialize_scaffold(target_root: Path, *, overwrite: bool = False) -> None:
+def materialize_scaffold(target_root: Path, *, overwrite: bool = False) -> int:
     """
     Copy all packaged scaffold files under ``target_root``.
 
     When ``overwrite`` is false, abort before overwriting an existing file.
     Callers should run project conflict checks (Phase 4.2) before invoking.
+
+    Returns:
+        Number of files written.
     """
     dest_root = target_root.resolve()
     written = 0
@@ -94,3 +97,4 @@ def materialize_scaffold(target_root: Path, *, overwrite: bool = False) -> None:
         written += 1
     if written == 0:
         raise ScaffoldPackagingError("no scaffold files were materialized")
+    return written

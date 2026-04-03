@@ -64,7 +64,9 @@
                                 </svg>
                             </button>
                         </h1>
-                        <p class="mt-2 text-gray-500">{{ gallery.description }}</p>
+                        {% if gallery.description %}
+                        <div class="mt-2 text-gray-500 markdown-content">{{ gallery.description | markdown | safe }}</div>
+                        {% endif %}
                         <div class="mt-4">
                             {% for tag in gallery.tags %}
                             <span class="inline-block bg-gray-200 rounded-full px-3 py-1 text-sm font-semibold text-gray-700 mr-2 mb-2">#{{ tag }}</span>

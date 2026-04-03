@@ -7,18 +7,22 @@ from pathlib import Path
 
 import pytest
 
+from gengallery import __version__
 from gengallery.cli import build_parser, dispatch, main, parse_args
 from gengallery.commands import init as cmd_init
 from gengallery.commands import push as cmd_push
 from gengallery.commands import serve as cmd_serve
 from gengallery.commands import update as cmd_update
-from gengallery.constants import DEFAULT_SERVE_PORT
+from gengallery.constants import CLI_APP_NAME, DEFAULT_SERVE_PORT
 
 
-def test_top_level_help_exits_zero():
+def test_top_level_help_exits_zero(capsys):
     with pytest.raises(SystemExit) as exc_info:
         parse_args(["--help"])
     assert exc_info.value.code == 0
+    out = capsys.readouterr().out
+    assert CLI_APP_NAME in out
+    assert __version__ in out
 
 
 def test_init_yields_init_run():
@@ -67,7 +71,8 @@ def test_push_missing_provider_exits_nonzero():
     assert exc_info.value.code != 0
 
 
-def test_dispatch_init_stub_succeeds(tmp_path: Path):
+def test_dispatch_init_stub_succeeds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("gengallery.commands.init.run_npm_install", lambda _p: None)
     args = parse_args(["init"])
     assert dispatch(args, cwd=tmp_path) == 0
 

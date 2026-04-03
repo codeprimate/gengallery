@@ -42,12 +42,14 @@ where = ["src"]
 # Extension list avoids shipping `__pycache__` if present under `assets/`.
 "gengallery" = [
     "assets/**/*.yaml",
+    "assets/**/*.json",
     "assets/**/*.jinja",
     "assets/**/*.css",
     "assets/**/*.js",
     "assets/**/*.txt",
     "assets/**/*.svg",
     "assets/**/*.ico",
+    "assets/**/*.webp",
 ]
 
 [tool.pytest.ini_options]

@@ -7,11 +7,13 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from gengallery import __version__
 from gengallery.commands import init as cmd_init
 from gengallery.commands import push as cmd_push
 from gengallery.commands import serve as cmd_serve
 from gengallery.commands import update as cmd_update
 from gengallery.constants import (
+    CLI_APP_NAME,
     CMD_INIT,
     CMD_PUSH,
     CMD_PUSH_SSH,
@@ -32,13 +34,15 @@ CommandHandler = Callable[[Path, argparse.Namespace], int]
 
 
 def _cli_description() -> str:
-    return "Static photo gallery build, serve, and deploy."
+    tagline = "Static photo gallery build, serve, and deploy."
+    return f"{CLI_APP_NAME} {__version__}\n\n{tagline}"
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="gengallery",
+        prog=CLI_APP_NAME,
         description=_cli_description(),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     subparsers = parser.add_subparsers(
         dest="command",
@@ -48,12 +52,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     init_parser = subparsers.add_parser(
         CMD_INIT,
-        help="Create project scaffolding (config, galleries, templates).",
+        help="Create project scaffolding and run npm install (Tailwind).",
         description=(
-            "Create config.yaml, a galleries directory with an example gallery, and Jinja "
-            "templates under templates/. Missing parent directories are created. "
-            "If config.yaml, galleries, or templates already exist in the target directory, "
-            "the command fails (there is no --force or overwrite mode)."
+            "Create config.yaml, package.json, a galleries directory with an example gallery, "
+            "and Jinja templates under templates/. Then run npm install in the project directory "
+            "(requires Node.js and npm on PATH). Missing parent directories are created. "
+            "If config.yaml, package.json, galleries, or templates already exist in the target "
+            "directory, the command fails (there is no --force or overwrite mode)."
         ),
     )
     init_parser.add_argument(

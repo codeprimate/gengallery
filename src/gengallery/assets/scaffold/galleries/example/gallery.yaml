@@ -6,14 +6,38 @@
 title: "Example gallery"
 date: 2026-04-03
 location: ""
-description: >-
+description: |-
   Gallery blurb shown on listing and gallery pages. Edit this text or clear it.
+
+  Supports **Markdown** formatting.
+
+  ## Add Sections
+
+  ### And Subsections
+
+  *Lists*:
+
+  - This
+  - That
+  - Another
 tags:
   - example
   - featured
-content: >-
-  Optional body text for templates that render gallery.content (often markdown).
+content: |-
+  Optional body text for the gallery page in Markdown.
+
+  Supports **Markdown** formatting.
+
+  ## Add Sections
+
+  ### And Subsections
+
+  *Lists*:
+
+  - This
+  - That
+  - Another
 encrypted: false
 password: ""
 unlisted: false
-cover: ""
+cover: lightbulb.webp
