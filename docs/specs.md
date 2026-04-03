@@ -1,20 +1,26 @@
 # Photo Gallery Generator Specifications
 
-This document outlines the specifications for a static photo gallery generator using Python scripts, YAML for configuration and gallery information, and JSON for storing processed gallery and image data.
+This document outlines the specifications for a static photo gallery generator using Python, YAML for configuration and gallery information, and JSON for storing processed gallery and image data.
+
+**Execution:** Authors and automation use the **`gengallery`** CLI (`pyproject.toml` console script). Implementation modules live under **`src/gengallery/`** (see `services/` for processors and generator). Legacy **`bin/*.py`** scripts are removed.
 
 ## Project Structure
 
 ```
 .
-├── bin/
-│   ├── image_processor.py
-│   ├── gallery_processor.py
-│   ├── generator.py
-│   ├── deploy_ssh.py
-│   ├── deploy_aws.py
-│   ├── refresh.py
-│   ├── serve.py
-│   └── deploy_ssh.py
+├── src/gengallery/
+│   ├── cli.py
+│   ├── commands/
+│   ├── services/
+│   │   ├── image_processor.py
+│   │   ├── video_processor.py
+│   │   ├── gallery_processor.py
+│   │   ├── generator.py
+│   │   ├── deploy_ssh.py
+│   │   ├── update.py
+│   │   ├── serve.py
+│   │   └── …
+│   └── assets/
 ├── galleries/
 │   └── YYYYMMDD/
 │       ├── gallery.yaml
@@ -64,7 +70,8 @@ This document outlines the specifications for a static photo gallery generator u
 │               └── thumbnail/
 │                   └── *.jpg
 ├── config.yaml
-└── README.md
+├── pyproject.toml
+└── docs/README.md
 ```
 
 ## Configuration (config.yaml)
@@ -133,7 +140,9 @@ cover: "best_shot.jpg"
 # ... other configuration ...
 ```
 
-## Script Functionalities
+## Script Functionalities (package: `gengallery.services`)
+
+The following describe behavior implemented under `src/gengallery/services/`. The supported operator entrypoint is **`gengallery update`** (full pipeline), not direct script execution.
 
 ### image_processor.py
 - Reads configuration from config.yaml
@@ -177,32 +186,28 @@ cover: "best_shot.jpg"
 - Copies static assets
 - Provides build summary with statistics
 
-### deploy_ssh.py
+### deploy_ssh.py (CLI: `gengallery push ssh`)
 - Deploys generated site via SSH/rsync
 - Configurable host, user, and destination
-- Runs post-sync commands (permissions, etc.)
+- Runs post-sync commands (permissions, etc.); `post_sync_commands` required in config
 - Uses SSH configuration from config.yaml
 
 ### deploy_aws.py
-- Deploys generated site to AWS S3/CloudFront
-- Configurable bucket and distribution settings
-- Handles CloudFront cache invalidation
-- Uses AWS credentials from environment/config
+- **Not exposed via `gengallery` CLI in this release.** Historical boto3-based deploy lived in a standalone module; operators use external tooling or future provider support.
 
-### refresh.py
-- Convenience script to rebuild the entire site
-- Runs the processing pipeline in sequence:
-  1. Process images
-  2. Process galleries
-  3. Generate site
-  4. Deploy (optional)
-- Provides consolidated output of all stages
+### update.py / `gengallery update`
+- Rebuilds the entire site through the same stage order as the former `refresh.py`:
+  1. Process images (`--all` when invoked from CLI orchestrator)
+  2. Process videos
+  3. Process galleries (aggregate metadata)
+  4. Generate site (HTML, Tailwind, static copy, optional `.htpasswd`)
+- Does not embed an optional deploy stage; use `gengallery push ssh` separately when needed
 
-### serve.py
-- Local development server for testing
-- Serves the generated site from public_html directory
-- Supports live reload for development
-- Configurable port and host settings
+### serve.py / `gengallery serve`
+- Local preview server
+- Serves `output_path/public_html`; binds to **127.0.0.1** by default
+- **No** live reload (simple static file HTTP handler)
+- `--port` overrides default (8000)
 
 ## Data Structures
 
@@ -286,18 +291,14 @@ cover: "best_shot.jpg"
 - Provides navigation back to the gallery page
 
 ## Workflow
-1. User populates source/galleries with new galleries and images
+1. User populates `galleries/` with new galleries and images (or runs `gengallery init` for a new project).
 2. For development:
-   - Run `serve.py` to start local development server
-   - Make changes and preview in browser
+   - Run **`gengallery update`** to rebuild
+   - Run **`gengallery serve`** to preview `public_html` in the browser
 3. For production:
-   - Run `refresh.py` to rebuild entire site
-   - Optionally specify deployment target (SSH/AWS)
-4. Alternatively, run individual scripts as needed:
-   - `image_processor.py` to process new images
-   - `gallery_processor.py` to update gallery metadata
-   - `generator.py` to rebuild HTML/CSS
-   - `deploy_ssh.py` or `deploy_aws.py` to publish
+   - Run **`gengallery update`** to rebuild the entire site
+   - Run **`gengallery push ssh`** when using rsync/SSH deploy (after configuring `ssh` in `config.yaml`)
+4. Advanced: individual stages can still be invoked programmatically from `gengallery.services` during development; the supported user workflow is the **`gengallery`** CLI.
 
 This system is designed to be flexible, easily extensible, and to generate a clean, responsive photo gallery website.
 

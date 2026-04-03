@@ -1,13 +1,7 @@
 import json
-import os
-import sys
+from pathlib import Path
 
-FIXTURE_PATH = os.path.join("fixtures", "crypto", "v1_vectors.json")
-BIN_PATH = os.path.abspath("bin")
-if BIN_PATH not in sys.path:
-    sys.path.insert(0, BIN_PATH)
-
-from crypto_v1 import (  # noqa: E402
+from gengallery.services.crypto_v1 import (
     derive_image_key_bytes,
     derive_metadata_key_bytes,
     derive_storage_token,
@@ -15,11 +9,13 @@ from crypto_v1 import (  # noqa: E402
     derive_storage_token_hash_hex,
     get_gallery_salt_bytes,
 )
-from envelope_v1 import decrypt_payload, encrypt_payload, parse_envelope  # noqa: E402
+from gengallery.services.envelope_v1 import decrypt_payload, encrypt_payload, parse_envelope
+
+FIXTURE_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "crypto" / "v1_vectors.json"
 
 
 def load_vectors():
-    with open(FIXTURE_PATH) as fixture_file:
+    with FIXTURE_PATH.open(encoding="utf-8") as fixture_file:
         return json.load(fixture_file)["vectors"]
 
 

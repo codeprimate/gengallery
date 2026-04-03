@@ -1,17 +1,8 @@
 """Tests for gallery media timeline (prev/next across images and videos)."""
 
-import os
-import sys
 import unittest
 
-BIN_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "bin"))
-if BIN_PATH not in sys.path:
-    sys.path.insert(0, BIN_PATH)
-
-from generator import (  # noqa: E402
-    build_gallery_media_timeline,
-    neighbors_in_timeline,
-)
+from gengallery.services.generator import build_gallery_media_timeline, neighbors_in_timeline
 
 
 class TestGalleryMediaTimeline(unittest.TestCase):

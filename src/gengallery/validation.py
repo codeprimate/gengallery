@@ -84,7 +84,7 @@ def validate_ssh_config(config: dict) -> dict:
     Validate ``ssh`` section for ``push ssh``.
 
     ``user``, ``host``, ``destination``, and ``group`` are optional in YAML; defaults match
-    legacy ``bin/deploy_ssh.py``. ``post_sync_commands`` is required and must be a non-empty list.
+    historical deploy_ssh behavior. ``post_sync_commands`` is required and must be a non-empty list.
     """
     ssh_raw = config.get("ssh")
     if not isinstance(ssh_raw, dict):

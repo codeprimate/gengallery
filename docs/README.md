@@ -12,24 +12,33 @@ The rest you do is your business.
 
 ## Getting Started
 
-1. Copy `config.example.yaml` to `config.yaml` and make changes as desired.
+The **gengallery** command is the supported entrypoint (console script from this package). After dependencies are installed, run it via `uv run gengallery …` or activate your environment and run `gengallery` directly.
 
-2. Install Python dependencies with uv:
+1. **New project:** scaffold a directory (missing parents are created; existing `config.yaml`, `galleries/`, or `templates/` cause a **non-zero exit**—there is no `--force`):
+   ```bash
+   uv sync --extra dev
+   uv run gengallery init /path/to/my-gallery-site
+   ```
+   Then edit `config.yaml` and add content under `galleries/` as below.
+
+2. **Existing project:** copy `config.example.yaml` to `config.yaml` if you do not already have one, and adjust paths and settings.
+
+3. Install Python dependencies with uv:
    ```bash
    uv sync --extra dev
    ```
 
-3. Install Node.js and npm:
+4. Install Node.js and npm:
    - Windows: Download and install from [nodejs.org](https://nodejs.org/)
    - macOS: `brew install node`
    - Linux: Use your package manager (e.g., `apt install nodejs npm`)
 
-4. Install Tailwind CSS dependencies:
+5. Install Tailwind CSS dependencies:
    ```bash
    npm install
    ```
 
-5. For SSH deployment, ensure rsync is installed:
+6. For SSH deployment, ensure rsync is installed:
    - Windows: Install via WSL or Cygwin
    - macOS: Included by default
    - Linux: `apt install rsync` or equivalent
@@ -48,10 +57,11 @@ This project uses `uv` as the Python dependency manager.
    uv sync --extra dev
    ```
 
-3. Run Python tests in the uv-managed environment:
+3. Run Python tests in the uv-managed environment (or `make test`):
    ```bash
-   uv run --extra dev python -m pytest tests/python/test_crypto_vectors.py
+   uv run pytest tests/python -m "not integration"
    ```
+   Expensive integration tests (optional): `make test-integration` (sets `GENGALLERY_INTEGRATION=1`).
 
 4. Run JS parity tests:
    ```bash
@@ -65,14 +75,50 @@ This project uses `uv` as the Python dependency manager.
 
 ## Usage
 
-1. Create a folder in `galleries` (recommended format: YYYYMMDD), and add a `gallery.yaml`
-2. Add your images and optional image metadata YAML files
+### Path argument (all commands)
+
+For `gengallery init`, `update`, `serve`, and `push ssh`, the optional project path works as follows:
+
+- **Omitted** — project root is the **current working directory**.
+- **Relative** — resolved against the current working directory (e.g. `gengallery update ./my-site`).
+- **Absolute** — used as-is after normalization (symlinks resolved).
+
+Examples (from inside the project directory):
+
+```bash
+gengallery update
+gengallery serve
+gengallery push ssh
+```
+
+Or with an explicit path:
+
+```bash
+gengallery update /path/to/site
+gengallery serve ../other-site --port 8000
+```
+
+### Day-to-day workflow
+
+1. Create a folder in `galleries` (recommended format: YYYYMMDD), and add a `gallery.yaml`.
+2. Add your images and optional image metadata YAML files.
 3. **Videos (optional):** Install `ffmpeg` and `ffprobe` on your PATH. Put `.mp4`, `.mov`, or `.m4v` files in the gallery folder next to your photos (same directory as `gallery.yaml`). They are transcoded to H.264/AAC (max **120s** trim, **3 Mbps** at 720p-tier height / **5 Mbps** at 1080p-tier) plus a grid thumbnail; playback files are written under `export/.../galleries/<id>/video/`. Optional sidecar YAML next to each clip (e.g. `clip.yaml`) can set `title`, `caption`, and `tags`, same idea as photos.
-4. Run `bin/refresh.py --all` to update entire site, or if run for the first time
-5. Run `bin/refresh.py galleryname` to add/refresh that gallery
-6. Run `bin/serve.py` to start a development server with live reload
-7. It is safe to delete anything in `export` as long as you run `bin/refresh.py --all` afterward
-8. Run `git pull` for updates and new features
+4. Run **`gengallery update`** from the project root (or pass `[path]`). This runs the full pipeline—images, videos, gallery aggregation, and site generation—equivalent to the former `refresh.py` with **`--all`**. Per-gallery-only refresh is **not** exposed as a CLI subcommand in this release.
+5. Run **`gengallery serve`** to preview the built site. The server binds to **127.0.0.1** only, default port **8000** (override with `--port`). There is **no** live reload; it is Python’s `SimpleHTTPRequestHandler` serving `output_path/public_html`.
+6. It is safe to delete content under `export` as long as you run **`gengallery update`** afterward to rebuild.
+7. Run `git pull` for updates and new features.
+
+### Migration from legacy `bin/*.py` scripts
+
+Older docs and automation may have called `bin/refresh.py`, `bin/serve.py`, `bin/deploy_ssh.py`, etc. Those entrypoints have been **removed**. Use:
+
+| Former | Replacement |
+|--------|-------------|
+| `bin/refresh.py` (full build) | `gengallery update` |
+| `bin/serve.py` | `gengallery serve` |
+| `bin/deploy_ssh.py` | `gengallery push ssh` |
+
+There is **no** `gengallery push aws` in this release (AWS deploy is out of scope for the CLI; the historical script was `bin/deploy_aws.py`).
 
 ## Gallery Configuration
 
@@ -160,31 +206,10 @@ See `docs/example_gallery/waves.yaml` for an example:
 
 ## Deployment
 
-The project supports two deployment methods: AWS (S3/CloudFront) and SSH/rsync.
+### SSH / rsync (supported CLI)
 
-### AWS Deployment
+Configure SSH settings in `config.yaml`. The key `ssh.post_sync_commands` must be a **non-empty** list of strings. `user`, `host`, `destination`, and `group` may be omitted; defaults match the previous `deploy_ssh.py` behavior.
 
-Configure AWS settings in `config.yaml`:
-```yaml
-aws:
-  access_key_id: YOUR_ACCESS_KEY_ID
-  secret_access_key: YOUR_SECRET_ACCESS_KEY
-  region: YOUR_AWS_REGION
-  s3:
-    bucket_name: YOUR_BUCKET_NAME
-  cloudfront:
-    distribution_id: YOUR_DISTRIBUTION_ID  # Optional
-```
-
-Run `bin/deploy.py` to deploy via AWS. This will:
-- Upload new and modified files to S3
-- Remove files from S3 that no longer exist locally
-- Automatically detect content types for files
-- Invalidate CloudFront cache (if distribution_id is configured)
-
-### SSH Deployment
-
-Configure SSH settings in `config.yaml`:
 ```yaml
 ssh:
   user: "admin"
@@ -196,10 +221,26 @@ ssh:
     - "sudo chmod -R go+rX {destination}"
 ```
 
-Run `bin/deploy_ssh.py` to deploy via SSH/rsync. This will:
-- Sync files using rsync to the remote server
-- Execute configured post-sync commands (e.g., setting permissions)
-- Support variable substitution in commands ({user}, {group}, {destination})
+From the project directory (or pass `[path]`):
+
+```bash
+gengallery push ssh
+```
+
+This will:
+
+- Sync `output_path/public_html` to the remote `destination` using rsync over SSH
+- Run each `post_sync_commands` entry after sync
+- Substitute `{user}`, `{group}`, and `{destination}` in those commands
+
+### AWS (S3 / CloudFront)
+
+AWS deployment is **not** wired into the `gengallery` CLI in this release (`gengallery push aws` is unavailable). Configure AWS in `config.yaml` if you use external tooling or a future provider subcommand. Typical expectations when using boto3-based automation:
+
+- Upload new and modified files to S3
+- Remove remote objects that no longer exist locally
+- Set content types appropriately
+- Optionally invalidate a CloudFront distribution
 
 ### Prerequisites for Deployment
 
@@ -215,15 +256,16 @@ For SSH:
 
 ### Troubleshooting
 
-AWS:
-- Ensure your AWS credentials have sufficient permissions
-- Verify your S3 bucket exists and is accessible
-- Check that your CloudFront distribution ID is correct if using CDN
+**SSH / `gengallery push ssh`**
 
-SSH:
 - Verify SSH connectivity to the remote server
 - Ensure rsync is installed on both systems
-- Check that the user has necessary permissions for post-sync commands
+- Check that `post_sync_commands` is present and non-empty (otherwise the CLI exits with an error)
+- Check that the remote user can run the configured post-sync commands
+
+**AWS (external / future CLI)**
+
+- Ensure credentials and bucket permissions are correct if you deploy outside the packaged CLI
 
 ## Requirements
 

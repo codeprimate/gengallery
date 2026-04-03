@@ -1,16 +1,11 @@
-"""Unit tests for bin/video_encoding.py (no ffmpeg)."""
+"""Unit tests for video_encoding helpers (no ffmpeg)."""
 
 import os
-import sys
 import tempfile
 
 import pytest
 
-BIN_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "bin"))
-if BIN_PATH not in sys.path:
-    sys.path.insert(0, BIN_PATH)
-
-from video_encoding import (  # noqa: E402
+from gengallery.services.video_encoding import (
     AUDIO_BITRATE_AAC_BPS,
     VIDEO_BITRATE_BPS_720,
     VIDEO_BITRATE_BPS_1080,

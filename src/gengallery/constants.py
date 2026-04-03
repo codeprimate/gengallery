@@ -19,7 +19,7 @@ PUBLIC_HTML_SEGMENT = "public_html"
 # Packaged init scaffold (`gengallery.assets.scaffold`)
 SCAFFOLD_EXAMPLE_GALLERY_DIRNAME = "example"
 
-# SSH deploy defaults (parity with legacy bin/deploy_ssh.py when keys omitted from config)
+# SSH deploy defaults (parity with historical deploy_ssh when keys omitted from config)
 SSH_DEFAULT_USER = "admin"
 SSH_DEFAULT_HOST = "gallery.nil42.com"
 SSH_DEFAULT_DESTINATION = "/data/gallery/"

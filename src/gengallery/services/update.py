@@ -38,7 +38,7 @@ def _run_stage_with_all_argv(module_main, argv0: str, saved_argv: list[str]) -> 
 
 def run_update(project_root: Path, config: dict) -> None:
     """
-    Run stages in the same order as ``bin/refresh.py``.
+    Run stages in the same order as the historical monolithic refresh orchestrator.
 
     - Injects ``config`` into the shared in-process dict used by image/video/gallery services.
     - Sets the process working directory to ``project_root`` for path-relative I/O (templates,

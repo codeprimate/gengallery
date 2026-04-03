@@ -1,1 +1,1 @@
-"""Pipeline modules: processors, crypto, site generation (ported from ``bin/``)."""
+"""Pipeline modules: processors, crypto, site generation."""
