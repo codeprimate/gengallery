@@ -15,16 +15,8 @@ import time
 
 import yaml
 from rich.console import Console
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TaskProgressColumn,
-    TextColumn,
-    TimeElapsedColumn,
-    TimeRemainingColumn,
-)
 
+from gengallery.constants import PROGRESS_STAGE_VIDEO_PROCESSING
 from gengallery.services.crypto_v1 import derive_metadata_key_bytes, derive_storage_token_bytes
 from gengallery.services.envelope_v1 import encrypt_payload
 from gengallery.services.image_processor import (
@@ -38,6 +30,7 @@ from gengallery.services.image_processor import (
     get_variant_extension,
 )
 from gengallery.services.pipeline_types import VideoStageResult
+from gengallery.services.progress_display import create_file_progress, set_file_task_description
 from gengallery.services.video_encoding import (
     VIDEO_MAX_DURATION_SECONDS,
     build_aac_audio_args,
@@ -326,8 +319,6 @@ def process_video(
     video_path: str,
     gallery_id: str,
     gallery_config: dict,
-    progress: Progress | None = None,
-    overall_task=None,
 ) -> tuple[dict, bool]:
     """
     Process a single video.
@@ -340,8 +331,6 @@ def process_video(
     video_id = generate_video_id(basename, gallery_id, is_encrypted)
 
     if check_video_outputs(video_path, gallery_id, video_id, is_encrypted):
-        if progress and overall_task is not None:
-            progress.advance(overall_task)
         meta_path = os.path.join(
             config["output_path"], "metadata", gallery_id, f"{video_id}.json"
         )
@@ -437,9 +426,6 @@ def process_video(
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(to_write, f, indent=2)
 
-    if progress and overall_task is not None:
-        progress.advance(overall_task)
-
     return to_write, False
 
 
@@ -505,33 +491,29 @@ def run(gallery_names: list[str]) -> VideoStageResult:
         total += len(videos)
         galleries_with_videos.append((gallery_name, videos, gallery_config))
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description: <50}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        TimeElapsedColumn(),
-        TimeRemainingColumn(),
-        console=console,
-        expand=True,
-    ) as progress:
-        overall_task = progress.add_task("[cyan]Videos", total=total)
+    with create_file_progress(console) as progress:
+        overall_task = progress.add_task("", total=total)
 
         for gallery_name, videos, gallery_config in galleries_with_videos:
             for vp in videos:
+                basename = os.path.basename(vp)
+                set_file_task_description(
+                    progress,
+                    overall_task,
+                    PROGRESS_STAGE_VIDEO_PROCESSING,
+                    gallery_name,
+                    basename,
+                )
                 try:
-                    _, was_skipped = process_video(
-                        vp, gallery_name, gallery_config, progress, overall_task
-                    )
+                    _, was_skipped = process_video(vp, gallery_name, gallery_config)
                     if was_skipped:
                         skipped += 1
                     else:
                         processed += 1
                 except Exception as e:
-                    errors.append((os.path.basename(vp), str(e)))
+                    errors.append((basename, str(e)))
                     failed += 1
-                    if progress:
-                        progress.advance(overall_task)
+                progress.advance(overall_task)
 
     return VideoStageResult(
         gallery_counts=gallery_counts,

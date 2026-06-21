@@ -1,4 +1,4 @@
-PYTHON ?= python3
+PYTHON ?= python
 
 .PHONY: help install install-dev build clean format lint typecheck test test-unit test-integration coverage check check-all
 

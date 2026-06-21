@@ -59,9 +59,9 @@ import hashlib
 import time
 import warnings
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, TimeRemainingColumn
 import sys
 from pillow_heif import register_heif_opener
+from gengallery.constants import PROGRESS_STAGE_IMAGE_PROCESSING
 from gengallery.services.crypto_v1 import (
     derive_image_key_bytes,
     derive_metadata_key_bytes,
@@ -69,6 +69,7 @@ from gengallery.services.crypto_v1 import (
 )
 from gengallery.services.envelope_v1 import decrypt_payload, encrypt_payload
 from gengallery.services.pipeline_types import ImageStageResult
+from gengallery.services.progress_display import create_file_progress, set_file_task_description
 
 # Suppress specific warnings
 warnings.filterwarnings("ignore", category=Image.DecompressionBombWarning)
@@ -569,8 +570,7 @@ def process_image_variants(img: Image.Image, image_id: str, gallery_id: str,
         else:
             img_copy.save(output_path, "JPEG", quality=config['jpg_quality'])
 
-def process_image(image_path: str, gallery_id: str, gallery_config: dict,
-                  progress: Progress = None, task=None) -> tuple[dict, bool]:
+def process_image(image_path: str, gallery_id: str, gallery_config: dict) -> tuple[dict, bool]:
     """
     Process a single image through the gallery preparation pipeline.
 
@@ -584,9 +584,6 @@ def process_image(image_path: str, gallery_id: str, gallery_config: dict,
                 if is_encrypted else generate_image_id(filename, gallery_id))
 
     if check_output_files(image_path, gallery_id, image_id, is_encrypted):
-        if progress and task is not None:
-            progress.advance(task)
-        
         metadata_path = os.path.join(config['output_path'], 'metadata', gallery_id, f"{image_id}.json")
         with open(metadata_path, 'r') as f:
             existing_metadata = json.load(f)
@@ -610,9 +607,6 @@ def process_image(image_path: str, gallery_id: str, gallery_config: dict,
         metadata_path = os.path.join(metadata_dir, f"{image_id}.json")
         with open(metadata_path, 'w') as f:
             json.dump(create_public_metadata_dict(output_metadata, is_encrypted), f, indent=2)
-
-        if progress and task is not None:
-            progress.advance(task)
 
     return output_metadata, False
 
@@ -722,30 +716,21 @@ def run(gallery_names: list[str]) -> ImageStageResult:
         total += len(images)
         galleries_with_images.append((gallery_name, images, gallery_config))
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description: <50}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        TimeElapsedColumn(),
-        TimeRemainingColumn(),
-        console=console,
-        expand=True,
-    ) as progress:
-        overall_task = progress.add_task("[cyan]Overall", total=total)
+    with create_file_progress(console) as progress:
+        overall_task = progress.add_task("", total=total)
 
         for gallery_name, images, gallery_config in galleries_with_images:
-            gallery_task = progress.add_task(
-                f"[blue]{gallery_name}[/] ({len(images)} images)",
-                total=len(images),
-            )
             for image in images:
                 image_path = os.path.join(config['source_path'], gallery_name, image)
+                set_file_task_description(
+                    progress,
+                    overall_task,
+                    PROGRESS_STAGE_IMAGE_PROCESSING,
+                    gallery_name,
+                    image,
+                )
                 try:
-                    _, was_skipped = process_image(
-                        image_path, gallery_name, gallery_config,
-                        progress, gallery_task,
-                    )
+                    _, was_skipped = process_image(image_path, gallery_name, gallery_config)
                     if was_skipped:
                         skipped += 1
                     else:
@@ -754,8 +739,6 @@ def run(gallery_names: list[str]) -> ImageStageResult:
                     errors.append((image, str(e)))
                     failed += 1
                 progress.advance(overall_task)
-
-            progress.update(gallery_task, completed=len(images))
 
     return ImageStageResult(
         gallery_counts=gallery_counts,

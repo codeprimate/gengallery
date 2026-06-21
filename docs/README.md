@@ -287,6 +287,12 @@ Deployment Dependencies:
 Security:
 - cryptography >= 37.0.0 (for encrypted galleries)
 
+## Specifications
+
+- [Core gallery generator](specs.md)
+- [Encrypted galleries](specs_enc.md)
+- [Face detection and identity labeling](specs_faces.md)
+
 # Copyright
 
 (c)2024-2025 codeprimate under MIT License

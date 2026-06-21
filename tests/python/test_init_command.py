@@ -42,8 +42,6 @@ def test_init_dispatch_creates_scaffold_in_empty_dir(
     args = parse_args(["init"])
     assert dispatch(args, cwd=tmp_path) == 0
     out = capsys.readouterr().out
-    assert CLI_APP_NAME in out
-    assert f"v{__version__}" in out
     assert INIT_MSG_LEAD_IN in out
     # Rich may wrap long paths across lines; banner path is still present.
     assert str(tmp_path.resolve()) in "".join(out.splitlines())

@@ -7,9 +7,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from gengallery import __version__
 from gengallery.constants import (
-    CLI_APP_NAME,
     CONFIG_FILENAME,
     EXIT_SUCCESS,
     GALLERIES_DIRNAME,
@@ -21,7 +19,7 @@ from gengallery.services.npm_install import run_npm_install
 
 _INIT_CONSOLE = Console()
 
-INIT_MSG_LEAD_IN = "is creating a new project at"
+INIT_MSG_LEAD_IN = "Creating a new project at"
 INIT_MSG_CREATED_PROJECT_DIR = "Created project directory:"
 INIT_MSG_WROTE_SCAFFOLD = "Wrote scaffold:"
 INIT_MSG_NPM_INSTALLING = "Installing npm dependencies (this may take a moment)…"
@@ -34,10 +32,7 @@ def run(project_root: Path, args: argparse.Namespace) -> int:
     _ = args
     target = project_root
     banner_path = target.resolve()
-    _INIT_CONSOLE.print(
-        f"[bold cyan]{CLI_APP_NAME}[/] [dim](v{__version__})[/] {INIT_MSG_LEAD_IN} "
-        f"[bold]{banner_path}[/]…"
-    )
+    _INIT_CONSOLE.print(f"{INIT_MSG_LEAD_IN} [bold]{banner_path}[/]…")
     created_project_dir = not target.exists()
     if created_project_dir:
         target.mkdir(parents=True, exist_ok=False)

@@ -1,4 +1,4 @@
-"""Orchestrates the full gallery refresh pipeline (image → video → gallery → site)."""
+"""Orchestrates the full gallery refresh pipeline (image → faces → video → gallery → site)."""
 
 from __future__ import annotations
 
@@ -12,9 +12,16 @@ from rich.rule import Rule
 from rich.table import Table
 from rich.text import Text
 
-from gengallery.services import gallery_processor, generator, image_processor, video_processor
+from gengallery.services import (
+    face_processor,
+    gallery_processor,
+    generator,
+    image_processor,
+    video_processor,
+)
 from gengallery.services.image_processor import apply_runtime_config
 from gengallery.services.pipeline_types import (
+    FaceStageResult,
     GalleryIndexResult,
     ImageStageResult,
     OutputPath,
@@ -24,7 +31,7 @@ from gengallery.services.pipeline_types import (
 
 _CONSOLE = Console()
 
-_STAGE_TOTAL = 4
+_STAGE_TOTAL = 5
 
 
 @contextmanager
@@ -58,7 +65,9 @@ def _print_stage_header(n: int, label: str, gallery_counts: dict[str, int], unit
     n_galleries = len(gallery_counts)
     gallery_word = "gallery" if n_galleries == 1 else "galleries"
     unit_word = f"{unit}s"
-    _CONSOLE.print(f"         {chips}     [dim]→ {total} {unit_word}, {n_galleries} {gallery_word}[/dim]")
+    _CONSOLE.print(
+        f"         {chips}     [dim]→ {total} {unit_word}, {n_galleries} {gallery_word}[/dim]"
+    )
 
 
 def _print_stage_completion(
@@ -76,6 +85,29 @@ def _print_stage_completion(
     _CONSOLE.print("         " + "  [dim]·[/dim]  ".join(parts))
     for filename, msg in result.errors:
         _CONSOLE.print(f"         [red]✗[/red] {filename} — {msg}")
+
+
+def _print_face_stage_result(result: FaceStageResult) -> None:
+    """Print summary line for the Faces stage."""
+    parts: list[str] = []
+    if result.images_processed:
+        parts.append(f"[green]{result.images_processed}[/green] processed")
+    if result.images_skipped:
+        parts.append(f"[dim]{result.images_skipped} up-to-date[/dim]")
+    if result.faces_detected:
+        parts.append(f"[green]{result.faces_detected}[/green] faces")
+    if result.identities_named:
+        parts.append(f"[blue]{result.identities_named}[/blue] named")
+    if result.clusters_anonymous:
+        parts.append(f"[dim]{result.clusters_anonymous} clusters[/dim]")
+    if result.errors:
+        parts.append(f"[red]{len(result.errors)} errors[/red]")
+    parts.append(_fmt_elapsed(result.elapsed))
+    _CONSOLE.print("         " + "  [dim]·[/dim]  ".join(parts))
+    for filename, msg in result.errors:
+        _CONSOLE.print(f"         [red]✗[/red] {filename} — {msg}")
+    for warning in result.warnings:
+        _CONSOLE.print(f"         [yellow]⚠[/yellow] {warning}")
 
 
 def _print_gallery_index_result(result: GalleryIndexResult) -> None:
@@ -186,11 +218,12 @@ def _print_output_table(output_paths: list[OutputPath]) -> None:
 
 def run_update(project_root: Path, config: dict) -> None:
     """
-    Run the full refresh pipeline in four stages:
+    Run the full refresh pipeline in five stages:
     1. Image processing
-    2. Video processing
-    3. Gallery index generation
-    4. Static site build
+    2. Face detection, labeling, and propagation
+    3. Video processing
+    4. Gallery index generation
+    5. Static site build
 
     The orchestrator owns all console output; individual stage ``run()``
     functions produce only Rich progress bars.
@@ -210,19 +243,25 @@ def run_update(project_root: Path, config: dict) -> None:
             img_result = image_processor.run(list(image_counts))
             _print_stage_completion(img_result)
 
-            # ── Stage 2: Videos ───────────────────────────────────────────
+            # ── Stage 2: Faces ────────────────────────────────────────────
+            face_counts = face_processor.discover_galleries()
+            _print_stage_header(2, "Faces", face_counts, unit="image")
+            face_result = face_processor.run()
+            _print_face_stage_result(face_result)
+
+            # ── Stage 3: Videos ───────────────────────────────────────────
             video_counts = video_processor.discover_gallery_videos()
-            _print_stage_header(2, "Videos", video_counts, unit="video")
+            _print_stage_header(3, "Videos", video_counts, unit="video")
             vid_result = video_processor.run(list(video_counts))
             _print_stage_completion(vid_result)
 
-            # ── Stage 3: Gallery Index ────────────────────────────────────
-            _CONSOLE.print(f"\n  [bold]\\[3/{_STAGE_TOTAL}][/bold]  [cyan]Gallery Index[/cyan]")
+            # ── Stage 4: Gallery Index ────────────────────────────────────
+            _CONSOLE.print(f"\n  [bold]\\[4/{_STAGE_TOTAL}][/bold]  [cyan]Gallery Index[/cyan]")
             idx_result = gallery_processor.run()
             _print_gallery_index_result(idx_result)
 
-            # ── Stage 4: Site Build ───────────────────────────────────────
-            _CONSOLE.print(f"\n  [bold]\\[4/{_STAGE_TOTAL}][/bold]  [cyan]Site Build[/cyan]")
+            # ── Stage 5: Site Build ───────────────────────────────────────
+            _CONSOLE.print(f"\n  [bold]\\[5/{_STAGE_TOTAL}][/bold]  [cyan]Site Build[/cyan]")
             site_result = generator.run()
             _print_site_build_result(site_result)
 

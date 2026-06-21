@@ -36,6 +36,12 @@ from gengallery.services.crypto_v1 import (
 )
 from gengallery.services.image_processor import config
 from gengallery.services.pipeline_types import GalleryIndexResult
+from gengallery.constants import (
+    FACES_CROPS_DIR,
+    FACES_DETECTIONS_DIR,
+    FACES_EMBEDDINGS_DIR,
+    FACES_META_DIR,
+)
 
 console = Console()
 
@@ -123,6 +129,36 @@ def cleanup_missing_video(gallery_id: str, video_metadata: dict, source_path: st
     return True
 
 
+def cleanup_face_artifacts(gallery_id: str, image_id: str, filename: str) -> None:
+    """Remove face pipeline artifacts for a deleted image.
+
+    Removes:
+    - export/metadata/faces/detections/{gallery_id}/{image_id}.json
+    - export/metadata/faces/embeddings/{face_id}.bin for each detected face
+    - export/metadata/faces/crops/{gallery_id}/{image_stem}_{face_index}.jpg
+    """
+    face_meta = os.path.join(config['output_path'], 'metadata', 'faces')
+    det_path = os.path.join(face_meta, FACES_DETECTIONS_DIR, gallery_id, f"{image_id}.json")
+    if os.path.exists(det_path):
+        try:
+            with open(det_path, 'r') as fh:
+                det = json.load(fh)
+            for face in det.get('faces', []):
+                emb = os.path.join(face_meta, FACES_EMBEDDINGS_DIR, f"{face['face_id']}.bin")
+                if os.path.exists(emb):
+                    os.remove(emb)
+        except Exception:
+            pass
+        os.remove(det_path)
+
+    image_stem = os.path.splitext(filename)[0]
+    crops_dir = os.path.join(face_meta, FACES_CROPS_DIR, gallery_id)
+    if os.path.isdir(crops_dir):
+        for crop in os.listdir(crops_dir):
+            if crop.startswith(image_stem + '_') and crop.endswith('.jpg'):
+                os.remove(os.path.join(crops_dir, crop))
+
+
 def cleanup_missing_image(gallery_id: str, image_metadata: dict, source_path: str) -> bool:
     """
     Clean up metadata and processed images for a missing source image.
@@ -169,7 +205,10 @@ def cleanup_missing_image(gallery_id: str, image_metadata: dict, source_path: st
         )
         if os.path.exists(metadata_blob_path):
             os.remove(metadata_blob_path)
-            
+
+    # Remove face pipeline artifacts for this image
+    cleanup_face_artifacts(gallery_id, image_metadata['id'], filename)
+
     return True
 
 
@@ -465,6 +504,8 @@ def run() -> GalleryIndexResult:
     removed: list[str] = []
     if os.path.isdir(metadata_root):
         for entry in os.listdir(metadata_root):
+            if entry == FACES_META_DIR:
+                continue
             if not os.path.isdir(os.path.join(metadata_root, entry)):
                 continue
             if entry not in source_set:

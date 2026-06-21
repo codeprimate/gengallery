@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gengallery"
-version = "0.2.0"
+version = "0.3.1"
 description = "Static photo gallery build and encryption tooling."
 readme = "docs/README.md"
 requires-python = ">=3.11"
@@ -20,6 +20,12 @@ dependencies = [
     "boto3>=1.26.0",
     "botocore>=1.29.0",
     "cryptography>=37.0.0",
+    # Face pipeline
+    "numpy>=1.24.0",
+    "onnxruntime>=1.16.0",
+    "opencv-python-headless>=4.8.0",
+    "insightface>=0.7.3",
+    "scikit-learn>=1.3.0",
 ]
 
 [project.optional-dependencies]

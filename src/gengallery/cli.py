@@ -7,13 +7,24 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from rich.console import Console
+
 from gengallery import __version__
+from gengallery.commands import faces as cmd_faces
 from gengallery.commands import init as cmd_init
 from gengallery.commands import push as cmd_push
 from gengallery.commands import serve as cmd_serve
 from gengallery.commands import update as cmd_update
 from gengallery.constants import (
     CLI_APP_NAME,
+    CMD_FACES,
+    CMD_FACES_ASSIGN,
+    CMD_FACES_MERGE,
+    CMD_FACES_PROPAGATE,
+    CMD_FACES_RECLUSTER,
+    CMD_FACES_REJECT,
+    CMD_FACES_SHOW,
+    CMD_FACES_UNASSIGN,
     CMD_INIT,
     CMD_PUSH,
     CMD_PUSH_SSH,
@@ -31,6 +42,15 @@ from gengallery.validation import (
 )
 
 CommandHandler = Callable[[Path, argparse.Namespace], int]
+
+_CLI_CONSOLE = Console()
+
+
+def print_cli_banner() -> None:
+    """Print the version banner as the first stdout line of every CLI invocation."""
+    _CLI_CONSOLE.print(
+        f"[bold cyan]{CLI_APP_NAME}[/] [dim](v{__version__})[/]"
+    )
 
 
 def _cli_description() -> str:
@@ -116,7 +136,113 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ssh_parser.set_defaults(handler=cmd_push.run)
 
+    _add_faces_parser(subparsers)
+
     return parser
+
+
+def _add_faces_parser(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]
+    """Register the 'faces' command and all its subcommands."""
+    _path_arg = dict(
+        dest="path",
+        nargs="?",
+        default=None,
+        metavar="PROJECT",
+        help="Project directory (default: current working directory).",
+    )
+
+    faces_parser = subparsers.add_parser(
+        CMD_FACES,
+        help="Face detection, identity labeling, and propagation.",
+    )
+    faces_subparsers = faces_parser.add_subparsers(
+        dest="faces_subcommand",
+        required=True,
+        metavar="SUBCOMMAND",
+    )
+
+    # assign
+    assign_p = faces_subparsers.add_parser(
+        CMD_FACES_ASSIGN,
+        help="Add positive label(s) for an identity.",
+    )
+    assign_p.add_argument("slug", help="Identity slug (e.g. 'alice').")
+    assign_p.add_argument(
+        "paths", nargs="+", metavar="PATH", help="Image path(s) (gallery/file.jpg)."
+    )
+    assign_p.add_argument(
+        "--face", type=int, default=None, metavar="N", help="Face index (0-based)."
+    )
+    assign_p.add_argument(**_path_arg)
+    assign_p.set_defaults(handler=cmd_faces.run_assign)
+
+    # unassign
+    unassign_p = faces_subparsers.add_parser(
+        CMD_FACES_UNASSIGN,
+        help="Remove positive label(s).",
+    )
+    unassign_p.add_argument("paths", nargs="+", metavar="PATH", help="Image path(s).")
+    unassign_p.add_argument("--face", type=int, default=None, metavar="N", help="Face index.")
+    unassign_p.add_argument(**_path_arg)
+    unassign_p.set_defaults(handler=cmd_faces.run_unassign)
+
+    # reject
+    reject_p = faces_subparsers.add_parser(
+        CMD_FACES_REJECT,
+        help="Add negative (reject) label(s) for an identity.",
+    )
+    reject_p.add_argument("slug", help="Identity slug.")
+    reject_p.add_argument("paths", nargs="+", metavar="PATH", help="Image path(s).")
+    reject_p.add_argument("--face", type=int, default=None, metavar="N", help="Face index.")
+    reject_p.add_argument(**_path_arg)
+    reject_p.set_defaults(handler=cmd_faces.run_reject)
+
+    # show
+    show_p = faces_subparsers.add_parser(
+        CMD_FACES_SHOW,
+        help="Print detections and write crop JPEGs.",
+    )
+    show_p.add_argument("paths", nargs="+", metavar="PATH", help="Image path(s).")
+    show_p.add_argument(**_path_arg)
+    show_p.set_defaults(handler=cmd_faces.run_show)
+
+    # merge
+    merge_p = faces_subparsers.add_parser(
+        CMD_FACES_MERGE,
+        help="Merge source identity into target identity.",
+    )
+    merge_p.add_argument("source_slug", help="Identity slug to merge from (will be removed).")
+    merge_p.add_argument("target_slug", help="Identity slug to merge into.")
+    merge_p.add_argument(**_path_arg)
+    merge_p.set_defaults(handler=cmd_faces.run_merge)
+
+    # recluster
+    recluster_p = faces_subparsers.add_parser(
+        CMD_FACES_RECLUSTER,
+        help="Drop anonymous cluster assignments and re-cluster unlabeled faces.",
+    )
+    recluster_p.add_argument(**_path_arg)
+    recluster_p.set_defaults(handler=cmd_faces.run_recluster)
+
+    # propagate
+    propagate_p = faces_subparsers.add_parser(
+        CMD_FACES_PROPAGATE,
+        help="Run identity propagation without a full update.",
+    )
+    propagate_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Show what would change without writing.",
+    )
+    propagate_p.add_argument(
+        "--identity",
+        default=None,
+        metavar="SLUG",
+        help="Limit propagation to a single identity slug.",
+    )
+    propagate_p.add_argument(**_path_arg)
+    propagate_p.set_defaults(handler=cmd_faces.run_propagate)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -138,6 +264,10 @@ def dispatch(args: argparse.Namespace, *, cwd: Path | None = None) -> int:
         validate_existing_project_for_update(project_root)
         handler = args.handler
         return handler(project_root, args)
+    if args.command == CMD_FACES:
+        validate_existing_project_for_update(project_root)
+        handler = args.handler
+        return handler(project_root, args)
     config = load_project_config(project_root)
     if args.command == CMD_SERVE:
         validate_serve_artifacts(project_root, config)
@@ -151,6 +281,7 @@ def dispatch(args: argparse.Namespace, *, cwd: Path | None = None) -> int:
 
 
 def main(argv: list[str] | None = None) -> None:
+    print_cli_banner()
     try:
         args = parse_args(argv)
         code = dispatch(args)

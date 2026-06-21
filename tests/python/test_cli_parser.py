@@ -16,6 +16,17 @@ from gengallery.commands import update as cmd_update
 from gengallery.constants import CLI_APP_NAME, DEFAULT_SERVE_PORT
 
 
+def test_main_prints_version_banner_first(capsys, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["gengallery", "init", "--help"])
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+    assert exc_info.value.code == 0
+    out = capsys.readouterr().out
+    first_line = out.splitlines()[0]
+    assert CLI_APP_NAME in first_line
+    assert f"v{__version__}" in first_line
+
+
 def test_top_level_help_exits_zero(capsys):
     with pytest.raises(SystemExit) as exc_info:
         parse_args(["--help"])
