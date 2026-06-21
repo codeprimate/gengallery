@@ -37,11 +37,13 @@ from gengallery.services.crypto_v1 import (
 from gengallery.services.image_processor import config
 from gengallery.services.pipeline_types import GalleryIndexResult
 from gengallery.constants import (
+    EXPORT_GALLERY_IDENTITIES_FIELD,
     FACES_CROPS_DIR,
     FACES_DETECTIONS_DIR,
     FACES_EMBEDDINGS_DIR,
-    FACES_META_DIR,
+    GALLERIES_METADATA_DIR,
 )
+from gengallery.services.gallery_paths import is_source_gallery_dirname
 
 console = Console()
 
@@ -129,15 +131,26 @@ def cleanup_missing_video(gallery_id: str, video_metadata: dict, source_path: st
     return True
 
 
+def identities_from_items(items: list[dict]) -> list[str]:
+    """Collect distinct identity slugs from image/video faces[] export fields."""
+    slugs: set[str] = set()
+    for item in items:
+        for face in item.get("faces", []):
+            identity_id = face.get("identity_id")
+            if identity_id:
+                slugs.add(identity_id)
+    return sorted(slugs)
+
+
 def cleanup_face_artifacts(gallery_id: str, image_id: str, filename: str) -> None:
     """Remove face pipeline artifacts for a deleted image.
 
     Removes:
-    - export/metadata/faces/detections/{gallery_id}/{image_id}.json
-    - export/metadata/faces/embeddings/{face_id}.bin for each detected face
-    - export/metadata/faces/crops/{gallery_id}/{image_stem}_{face_index}.jpg
+    - galleries/_metadata/detections/{gallery_id}/{image_id}.json
+    - galleries/_metadata/embeddings/{face_id}.bin for each detected face
+    - galleries/_metadata/crops/{gallery_id}/{image_stem}_{face_index}.jpg
     """
-    face_meta = os.path.join(config['output_path'], 'metadata', 'faces')
+    face_meta = os.path.join(config['source_path'], GALLERIES_METADATA_DIR)
     det_path = os.path.join(face_meta, FACES_DETECTIONS_DIR, gallery_id, f"{image_id}.json")
     if os.path.exists(det_path):
         try:
@@ -454,6 +467,10 @@ def process_gallery(gallery_path: str) -> dict:
     gallery_data['images'].sort(key=lambda x: x.get('exif', {}).get('DateTimeOriginal', ''), reverse=True)
     gallery_data['videos'].sort(key=lambda x: x.get('exif', {}).get('DateTimeOriginal', ''), reverse=True)
 
+    gallery_data[EXPORT_GALLERY_IDENTITIES_FIELD] = identities_from_items(
+        gallery_data['images'] + gallery_data['videos']
+    )
+
     if is_encrypted:
         gallery_data['manifest_path'] = write_manifest_file(gallery_data)
 
@@ -496,7 +513,8 @@ def run() -> GalleryIndexResult:
 
     galleries = [
         g for g in os.listdir(config['source_path'])
-        if os.path.isdir(os.path.join(config['source_path'], g))
+        if is_source_gallery_dirname(g)
+        and os.path.isdir(os.path.join(config['source_path'], g))
     ]
 
     source_set = set(galleries)
@@ -504,8 +522,6 @@ def run() -> GalleryIndexResult:
     removed: list[str] = []
     if os.path.isdir(metadata_root):
         for entry in os.listdir(metadata_root):
-            if entry == FACES_META_DIR:
-                continue
             if not os.path.isdir(os.path.join(metadata_root, entry)):
                 continue
             if entry not in source_set:

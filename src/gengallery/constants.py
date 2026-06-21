@@ -58,14 +58,18 @@ FACE_MODEL_BUNDLE_VERSION = "insightface-buffalo-l-v1"
 
 IDENTITIES_YAML = "galleries/identities.yaml"
 
-FACES_META_DIR = "faces"  # under export/metadata/
+# Face pipeline cache under {source_path}/_metadata/ (not export)
+GALLERIES_METADATA_DIR = "_metadata"
 FACES_INDEX_JSON = "index.json"
-FACES_IDENTITIES_JSON = "identities.json"
 FACES_CLUSTERS_DIR = "clusters"
 FACES_CLUSTERS_LATEST_JSON = "clusters/latest.json"
 FACES_DETECTIONS_DIR = "detections"
 FACES_EMBEDDINGS_DIR = "embeddings"
 FACES_CROPS_DIR = "crops"
+
+# Export metadata: per-image face assignment field (Option B)
+EXPORT_IMAGE_FACES_FIELD = "faces"
+EXPORT_GALLERY_IDENTITIES_FIELD = "identities"
 
 FACE_SCHEMA_VERSION = 1
 

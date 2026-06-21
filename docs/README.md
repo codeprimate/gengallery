@@ -102,7 +102,7 @@ gengallery serve ../other-site --port 8000
 1. Create a folder in `galleries` (recommended format: YYYYMMDD), and add a `gallery.yaml`.
 2. Add your images and optional image metadata YAML files.
 3. **Videos (optional):** Install `ffmpeg` and `ffprobe` on your PATH. Put `.mp4`, `.mov`, or `.m4v` files in the gallery folder next to your photos (same directory as `gallery.yaml`). They are transcoded to H.264/AAC (max **120s** trim, **3 Mbps** at 720p-tier height / **5 Mbps** at 1080p-tier) plus a grid thumbnail; playback files are written under `export/.../galleries/<id>/video/`. Optional sidecar YAML next to each clip (e.g. `clip.yaml`) can set `title`, `caption`, and `tags`, same idea as photos.
-4. Run **`gengallery update`** from the project root (or pass `[path]`). This runs the full pipeline—images, videos, gallery aggregation, and site generation—equivalent to the former `refresh.py` with **`--all`**. Per-gallery-only refresh is **not** exposed as a CLI subcommand in this release.
+4. Run **`gengallery update`** from the project root (or pass `[path]`). This runs the full pipeline—images, **face detection and labeling**, videos, gallery aggregation, and site generation—equivalent to the former `refresh.py` with **`--all`**. Per-gallery-only refresh is **not** exposed as a CLI subcommand in this release.
 5. Run **`gengallery serve`** to preview the built site. The server binds to **127.0.0.1** only, default port **8000** (override with `--port`). There is **no** live reload; it is Python’s `SimpleHTTPRequestHandler` serving `output_path/public_html`.
 6. It is safe to delete content under `export` as long as you run **`gengallery update`** afterward to rebuild.
 7. Run `git pull` for updates and new features.
@@ -194,6 +194,8 @@ Each image can have an optional YAML metadata file (same name as image with .yam
 - `caption`: Image caption (optional)
 - `tags`: List of tags for the image (optional)
 
+When face labeling is in use, the pipeline **manages** `person:{slug}` tags in sidecar YAML automatically (see [Face detection and identity labeling](#face-detection-and-identity-labeling)). Other tags you set by hand are left unchanged.
+
 The system will automatically extract and store EXIF data including:
 - Camera make and model
 - Lens information
@@ -201,7 +203,265 @@ The system will automatically extract and store EXIF data including:
 - GPS coordinates (if available)
 - Date and time
 
-See `docs/example_gallery/waves.yaml` for an example:
+See `docs/example_gallery/waves.yaml` for an example.
+
+## Face Detection and Identity Labeling
+
+GenGallery detects faces during **`gengallery update`**, lets you name people from the CLI, and propagates those names across your photo library. There is no person-browse page in the site yet—the payoff today is automatic **`person:alice`** tags on image sidecars and local metadata you can search or build on later.
+
+### Before you start
+
+1. Run from your **project root** (where `config.yaml` and `galleries/` live).
+2. Run **`gengallery update`** at least once so faces are detected. Labeling commands read detection data from the last update.
+3. On first use, face models download to **`~/.cache/gengallery/models/`**. Normal `uv sync` is enough—no extra install step.
+
+### Concepts (30 seconds)
+
+| Term | Meaning |
+|------|---------|
+| **Identity / slug** | A person’s stable ID, e.g. `alice`. Lowercase letters, digits, hyphens; must start with a letter. |
+| **Positive** | “This face **is** Alice.” You set these with `faces assign`. |
+| **Negative** | “This face is **not** Alice.” You set these with `faces reject` to stop false matches. |
+| **Propagated** | A match inferred from your positives. Recomputed every `update`. |
+| **Face index** | `0`, `1`, `2`… when an image has multiple people. Use `faces show` to see which is which. |
+
+Your positive labels are stored in **`galleries/identities.yaml`**. The CLI creates and edits this file. Commit it if you want names in git.
+
+---
+
+### Tutorial: name someone in your library
+
+Assume gallery folder `galleries/20240715/` with `portrait.jpg` (one person) and `party.jpg` (several people).
+
+**Step 1 — Detect faces**
+
+```bash
+gengallery update
+```
+
+**Step 2 — Pick a clear example and assign a name**
+
+Single-face photo (no `--face` needed):
+
+```bash
+gengallery faces assign alice 20240715/portrait.jpg
+```
+
+This creates `galleries/identities.yaml` if needed and records Alice’s face as a positive example.
+
+**Step 3 — Propagate across the library**
+
+```bash
+gengallery update
+```
+
+The face stage matches similar faces to Alice and writes **`person:alice`** into sidecar YAML (e.g. `20240715/wedding.yaml`) for every image where she appears.
+
+**Step 4 — Check a crowded photo**
+
+```bash
+gengallery faces show 20240715/party.jpg
+```
+
+Example output:
+
+```
+  20240715/party.jpg  3 face(s)
+    face  0  bbox=[0.120, 0.080, 0.220, 0.280]  conf=0.981  identity=alice  prov=propagated
+    face  1  bbox=[0.450, 0.100, 0.180, 0.240]  conf=0.972  identity=unassigned  prov=unassigned
+    face  2  bbox=[0.720, 0.090, 0.190, 0.250]  conf=0.965  identity=unassigned  prov=unassigned
+    Crops written:
+      galleries/_metadata/crops/20240715/party_0.jpg
+      galleries/_metadata/crops/20240715/party_1.jpg
+      galleries/_metadata/crops/20240715/party_2.jpg
+```
+
+Open the crop JPEGs to see who is face 0, 1, 2. Assign another person:
+
+```bash
+gengallery faces assign bob 20240715/party.jpg --face 1
+gengallery update
+```
+
+**Step 5 — Fix a wrong match**
+
+If Alice was propagated to the wrong face in a group shot:
+
+```bash
+gengallery faces reject alice 20240715/party.jpg --face 2
+gengallery update
+```
+
+That face will never be assigned to `alice` again. Add a positive for the correct person if needed:
+
+```bash
+gengallery faces assign bob 20240715/party.jpg --face 2
+gengallery update
+```
+
+---
+
+### Command recipes
+
+#### `faces show` — see faces before you label
+
+Always run this when an image might have **more than one** person:
+
+```bash
+gengallery faces show 20240715/party.jpg
+gengallery faces show 20240715/a.jpg 20240715/b.jpg   # multiple images
+```
+
+Writes crop thumbnails to **`galleries/_metadata/crops/{gallery_id}/`**. Face indices in the terminal match `--face N` on other commands.
+
+If you see **“No face detection data … Run gengallery update first”**, run `update` and try again.
+
+#### `faces assign` — “this face is `<slug>`”
+
+```bash
+# New identity (slug created automatically; display name title-cased from slug)
+gengallery faces assign alice 20240715/portrait.jpg
+
+# Multi-face image — --face is required
+gengallery faces assign bob 20240715/party.jpg --face 1
+
+# Several positives at once (same identity)
+gengallery faces assign alice 20240715/a.jpg 20240715/b.jpg --face 0
+```
+
+Rules:
+
+- **One face** in the image → omit `--face`.
+- **Multiple faces** → `--face N` is **required** or the command errors. Run `faces show` first.
+- **No faces detected** → error. The photo may be too small, blurred, or below confidence thresholds.
+
+After every assign, run **`gengallery update`** to propagate and refresh auto-tags.
+
+#### `faces unassign` — remove a positive you added by mistake
+
+```bash
+gengallery faces unassign 20240715/portrait.jpg
+gengallery faces unassign 20240715/party.jpg --face 0
+gengallery update
+```
+
+Removes the positive from `identities.yaml` and clears propagated assignment for that face on the next update. Does not delete the identity slug if other positives remain.
+
+#### `faces reject` — “this face is NOT `<slug>`”
+
+Use when propagation keeps matching the wrong person (twins, similar-looking relatives, etc.):
+
+```bash
+gengallery faces reject alice 20240715/group.jpg --face 2
+gengallery update
+```
+
+Negatives are stored in `identities.yaml` and block future propagation to that identity for that face only.
+
+#### `faces merge` — combine two identities
+
+If you accidentally created `alice-smith` and `alice`:
+
+```bash
+gengallery faces merge alice-smith alice
+gengallery update
+```
+
+All positives and negatives from the source move into the target; the source slug is removed.
+
+#### `faces propagate` — preview or rerun matching without a full rebuild
+
+```bash
+gengallery faces propagate --dry-run
+gengallery faces propagate --dry-run --identity alice
+gengallery faces propagate                    # apply changes
+```
+
+Useful when tuning **`faces.match_threshold`** in `config.yaml`. Lower = more matches (more false positives). Higher = stricter.
+
+#### `faces recluster` — regroup unknown faces
+
+```bash
+gengallery faces recluster
+gengallery update
+```
+
+Rebuilds anonymous **`id_unnamed_*`** clusters for faces with no named identity. Named assignments are untouched.
+
+---
+
+### What `gengallery update` does for faces
+
+Each update runs the face stage automatically (after images, before videos):
+
+1. Detect faces and compute embeddings (skipped for unchanged images when possible).
+2. Apply positives and negatives from **`galleries/identities.yaml`**.
+3. Propagate named identities to similar unlabeled faces.
+4. Cluster remaining unknowns into anonymous groups.
+5. Write **`person:{slug}`** tags into image sidecar YAML for **named** identities only.
+
+Example sidecar after update (`20240715/wedding.yaml`):
+
+```yaml
+tags:
+  - person:alice
+  - person:bob
+  - sunset
+```
+
+Tags you set manually (like `sunset`) are kept. Only **`person:*`** tags are rewritten each update.
+
+---
+
+### `identities.yaml` (optional to edit by hand)
+
+The CLI maintains this file. You can read or edit it directly if you prefer:
+
+```yaml
+identities:
+  alice:
+    display_name: Alice
+    positives:
+      - gallery: "20240715"
+        image: portrait.jpg
+      - gallery: "20240715"
+        image: party.jpg
+        face: 0
+    negatives:
+      - gallery: "20240715"
+        image: group.jpg
+        face: 2
+```
+
+After hand-editing, run **`gengallery update`** to apply changes.
+
+---
+
+### Configuration
+
+Optional `faces` section in `config.yaml`:
+
+```yaml
+faces:
+  match_threshold: 0.55          # propagation: higher = fewer false positives
+  cluster_threshold: 0.45        # anonymous recluster merge threshold
+  min_face_size_px: 40           # ignore tiny detections
+  min_detection_confidence: 0.50
+  auto_tag_prefix: "person:"
+  hdbscan_min_cluster_size: 2
+```
+
+If propagation is too aggressive, raise **`match_threshold`** (try `0.60`–`0.65`) and use **`faces propagate --dry-run`** to preview.
+
+---
+
+### Privacy and deployment
+
+- Embeddings and crops live under **`galleries/_metadata/`**—sensitive; back up with your project.
+- **`gengallery push ssh`** uploads **`export/public_html` only**—not `_metadata` or embeddings.
+- Anonymous slugs (`id_unnamed_*`) are never auto-tagged; only named people get `person:*` tags.
+
+Full design: [specs_faces.md](specs_faces.md).
 
 ## Deployment
 
@@ -278,6 +538,7 @@ Core Dependencies:
 - Jinja2 >= 3.0.0 (for template rendering)
 - markdown >= 3.4.0 (for markdown processing)
 - plum-py >= 0.8.0 (for binary data handling)
+- onnxruntime >= 1.16.0, numpy >= 1.24.0, opencv-python-headless >= 4.8.0 (face detection and identity labeling; models download on first use)
 
 Deployment Dependencies:
 - boto3 >= 1.26.0 (for AWS S3/CloudFront deployment)

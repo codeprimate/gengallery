@@ -62,6 +62,7 @@ from rich.console import Console
 import sys
 from pillow_heif import register_heif_opener
 from gengallery.constants import PROGRESS_STAGE_IMAGE_PROCESSING
+from gengallery.services.gallery_paths import is_source_gallery_dirname
 from gengallery.services.crypto_v1 import (
     derive_image_key_bytes,
     derive_metadata_key_bytes,
@@ -667,6 +668,8 @@ def discover_galleries() -> dict[str, int]:
     result = {}
     source = config['source_path']
     for gallery in sorted(os.listdir(source)):
+        if not is_source_gallery_dirname(gallery):
+            continue
         if not os.path.isdir(os.path.join(source, gallery)):
             continue
         gallery_path = os.path.join(source, gallery)

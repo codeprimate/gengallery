@@ -17,6 +17,7 @@ import yaml
 from rich.console import Console
 
 from gengallery.constants import PROGRESS_STAGE_VIDEO_PROCESSING
+from gengallery.services.gallery_paths import is_source_gallery_dirname
 from gengallery.services.crypto_v1 import derive_metadata_key_bytes, derive_storage_token_bytes
 from gengallery.services.envelope_v1 import encrypt_payload
 from gengallery.services.image_processor import (
@@ -445,6 +446,8 @@ def discover_gallery_videos() -> dict[str, int]:
     result = {}
     source = config["source_path"]
     for gallery in sorted(os.listdir(source)):
+        if not is_source_gallery_dirname(gallery):
+            continue
         gallery_path = os.path.join(source, gallery)
         if not os.path.isdir(gallery_path):
             continue
