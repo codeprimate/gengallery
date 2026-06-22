@@ -27,7 +27,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
 import time
 import warnings
 from pathlib import Path
@@ -56,9 +55,7 @@ from gengallery.constants import (
     FACES_EMBEDDINGS_DIR,
     FACES_INDEX_JSON,
     EXPORT_IMAGE_FACES_FIELD,
-    GALLERIES_DIRNAME,
     GALLERIES_METADATA_DIR,
-    IDENTITIES_YAML,
     PROGRESS_STAGE_FACE_CLUSTERING,
     PROGRESS_STAGE_FACE_DETECTION,
     PROGRESS_STAGE_FACE_FINALIZING,
@@ -106,6 +103,8 @@ console = Console()
 _DETECT_MAX_DIM = 1024
 # JPEG quality for written crop images
 _CROP_JPEG_QUALITY = 85
+# Detection JSON field storing the parameters used when faces were detected
+_DETECTION_PARAMS_FIELD = "detection_params"
 
 
 # ---------------------------------------------------------------------------
@@ -114,23 +113,8 @@ _CROP_JPEG_QUALITY = 85
 
 
 def _gallery_metadata_dir() -> Path:
-    """Absolute path to galleries/_metadata (embeddings, detections, crops)."""
-    return Path(config["source_path"]) / GALLERIES_METADATA_DIR
-
-
-def _legacy_export_face_dir() -> Path:
-    """Pre-move face cache location under export/metadata/faces."""
-    return Path(config["output_path"]) / "metadata" / "faces"
-
-
-def _migrate_legacy_face_metadata() -> None:
-    """Move export/metadata/faces to galleries/_metadata when upgrading layout."""
-    legacy = _legacy_export_face_dir()
-    target = _gallery_metadata_dir()
-    if not legacy.is_dir() or target.exists():
-        return
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(legacy), str(target))
+    """Resolved path to galleries/_metadata (embeddings, detections, crops)."""
+    return (Path(config["source_path"]).resolve() / GALLERIES_METADATA_DIR)
 
 
 def _detection_path(gallery_id: str, image_id: str) -> Path:
@@ -147,10 +131,6 @@ def _crop_path(gallery_id: str, image_stem: str, face_index: int) -> Path:
 
 def _export_image_metadata_path(gallery_id: str, image_id: str) -> Path:
     return Path(config["output_path"]) / "metadata" / gallery_id / f"{image_id}.json"
-
-
-def _identities_yaml_path() -> Path:
-    return Path(config.get("source_path", GALLERIES_DIRNAME)).parent / IDENTITIES_YAML
 
 
 # ---------------------------------------------------------------------------
@@ -191,21 +171,36 @@ def _face_id(gallery_id: str, image_id: str, face_index: int) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _source_mtimes() -> list[float]:
-    """Return list of relevant source-side file mtimes for skip comparisons."""
-    mtimes = [os.path.getmtime("config.yaml")]
-    iy = Path(IDENTITIES_YAML)
-    if iy.exists():
-        mtimes.append(os.path.getmtime(iy))
-    return mtimes
+def _detection_params(face_cfg: dict) -> dict[str, Any]:
+    """Return detection settings that require re-detection when changed."""
+    return {
+        "model_bundle_version": model_bundle_version(),
+        "min_face_size_px": face_cfg.get("min_face_size_px", FACE_DEFAULT_MIN_FACE_SIZE_PX),
+        "min_detection_confidence": face_cfg.get(
+            "min_detection_confidence", FACE_DEFAULT_MIN_DETECTION_CONFIDENCE
+        ),
+    }
 
 
-def _detection_is_fresh(detection_path: Path, image_mtime: float, base_mtimes: list[float]) -> bool:
-    """Return True if the detection JSON exists and is newer than all source files."""
-    if not detection_path.exists():
+def _detection_is_fresh(
+    gallery_id: str,
+    image_id: str,
+    image_mtime: float,
+    face_cfg: dict,
+) -> bool:
+    """Return True when cached detection output is valid for the current source image."""
+    detection_path = _detection_path(gallery_id, image_id)
+    if not detection_path.is_file():
         return False
-    det_mtime = os.path.getmtime(detection_path)
-    return det_mtime >= max(base_mtimes + [image_mtime])
+    if os.path.getmtime(detection_path) < image_mtime:
+        return False
+    with detection_path.open() as fh:
+        cached = json.load(fh)
+    stored_params = cached.get(_DETECTION_PARAMS_FIELD)
+    if stored_params is None:
+        # Records written before detection_params were tracked: image mtime only.
+        return True
+    return stored_params == _detection_params(face_cfg)
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +257,7 @@ def _bbox_normalised(x1: float, y1: float, x2: float, y2: float, w: int, h: int)
 
 def _load_detection(gallery_id: str, image_id: str) -> dict[str, Any] | None:
     p = _detection_path(gallery_id, image_id)
-    if not p.exists():
+    if not p.is_file():
         return None
     with p.open() as fh:
         return json.load(fh)
@@ -288,18 +283,16 @@ def _process_image(
     image_id: str,
     analyzer,
     face_cfg: dict,
-    base_mtimes: list[float],
     write_crops: bool = False,
 ) -> tuple[dict[str, Any], bool]:
     """Detect faces in one image, write detection JSON + embeddings.
 
     Returns (detection_record, was_skipped).
     """
-    det_path = _detection_path(gallery_id, image_id)
     image_mtime = os.path.getmtime(image_path)
 
-    if _detection_is_fresh(det_path, image_mtime, base_mtimes):
-        with det_path.open() as fh:
+    if _detection_is_fresh(gallery_id, image_id, image_mtime, face_cfg):
+        with _detection_path(gallery_id, image_id).open() as fh:
             return json.load(fh), True
 
     min_size = face_cfg.get("min_face_size_px", FACE_DEFAULT_MIN_FACE_SIZE_PX)
@@ -353,6 +346,7 @@ def _process_image(
         "gallery_id": gallery_id,
         "image_id": image_id,
         "source_filename": os.path.basename(image_path),
+        _DETECTION_PARAMS_FIELD: _detection_params(face_cfg),
         "faces": faces,
     }
     _write_detection(record)
@@ -710,7 +704,6 @@ def run() -> FaceStageResult:
         FaceStageResult with counts and elapsed time.
     """
     t0 = time.time()
-    _migrate_legacy_face_metadata()
     face_cfg: dict = config.get("faces", {})
     match_threshold = face_cfg.get("match_threshold", FACE_DEFAULT_MATCH_THRESHOLD)
     cluster_threshold = face_cfg.get("cluster_threshold", FACE_DEFAULT_CLUSTER_THRESHOLD)
@@ -720,7 +713,6 @@ def run() -> FaceStageResult:
     auto_tag_prefix = face_cfg.get("auto_tag_prefix", FACE_DEFAULT_AUTO_TAG_PREFIX)
 
     source = config["source_path"]
-    base_mtimes = _source_mtimes()
     errors: list[tuple[str, str]] = []
     stage_warnings: list[str] = []
 
@@ -739,11 +731,10 @@ def run() -> FaceStageResult:
             image_id = hashlib.md5(f"{gallery_id}:{filename}".encode()).hexdigest()[:12]
             all_image_paths.append((gallery_id, image_id, os.path.join(gallery_path, filename)))
 
-    analyzer = get_face_analyzer()
-
     images_processed = 0
     images_skipped = 0
     total_images = len(all_image_paths)
+    analyzer = None
 
     with create_file_progress(console) as progress:
         overall_task = progress.add_task("", total=total_images)
@@ -758,13 +749,19 @@ def run() -> FaceStageResult:
                 filename,
             )
             try:
+                image_mtime = os.path.getmtime(image_path)
+                if _detection_is_fresh(gallery_id, image_id, image_mtime, face_cfg):
+                    images_skipped += 1
+                    progress.advance(overall_task)
+                    continue
+                if analyzer is None:
+                    analyzer = get_face_analyzer()
                 _record, was_skipped = _process_image(
                     image_path=image_path,
                     gallery_id=gallery_id,
                     image_id=image_id,
                     analyzer=analyzer,
                     face_cfg=face_cfg,
-                    base_mtimes=base_mtimes,
                     write_crops=False,
                 )
                 if was_skipped:
@@ -794,7 +791,7 @@ def run() -> FaceStageResult:
             for face in det["faces"]:
                 fid = face["face_id"]
                 ep = _embedding_path(fid)
-                if ep.exists():
+                if ep.is_file():
                     try:
                         embeddings[fid] = load_embedding(ep)
                     except Exception:
@@ -872,6 +869,8 @@ def run() -> FaceStageResult:
                 face.pop("_blocked_identities", None)
                 face.pop("gallery_id", None)
                 face.pop("source_filename", None)
+            if _DETECTION_PARAMS_FIELD not in det:
+                det[_DETECTION_PARAMS_FIELD] = _detection_params(face_cfg)
             _write_detection(det)
 
         identities_named = len([s for s in store.identities if not s.startswith("id_unnamed_")])
@@ -943,7 +942,7 @@ def recluster() -> int:
             all_faces.append(face)
             fid = face["face_id"]
             ep = _embedding_path(fid)
-            if ep.exists():
+            if ep.is_file():
                 try:
                     embeddings[fid] = load_embedding(ep)
                 except Exception:
@@ -1016,7 +1015,7 @@ def propagate(dry_run: bool = False, identity_filter: str | None = None) -> list
             all_faces.append(face)
             fid = face["face_id"]
             ep = _embedding_path(fid)
-            if ep.exists():
+            if ep.is_file():
                 try:
                     embeddings[fid] = load_embedding(ep)
                 except Exception:
