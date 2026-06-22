@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 
 from rich.console import Console
+from rich.table import Table
 
 from gengallery.constants import (
     EXIT_SUCCESS,
@@ -280,6 +281,72 @@ def run_recluster(project_root: Path, args: argparse.Namespace) -> int:
         os.chdir(Path.cwd())
 
     _CONSOLE.print(f"  [green]✓[/green] Recluster complete — {placed} faces placed in clusters.")
+    return EXIT_SUCCESS
+
+
+# ---------------------------------------------------------------------------
+# list-unnamed
+# ---------------------------------------------------------------------------
+
+
+def run_list_unnamed(project_root: Path, args: argparse.Namespace) -> int:
+    """List anonymous identity clusters and unassigned singleton faces."""
+    import os  # noqa: PLC0415
+
+    config = load_project_config(project_root)
+    apply_runtime_config(config)
+
+    os.chdir(project_root)
+    try:
+        from gengallery.services.face_processor import (  # noqa: PLC0415
+            list_unnamed_identity_groups,
+            load_all_detections,
+        )
+
+        all_detections = load_all_detections()
+        if not all_detections:
+            _CONSOLE.print(
+                "[dim]No face detection data. Run 'gengallery update' first.[/dim]"
+            )
+            return EXIT_SUCCESS
+
+        groups = list_unnamed_identity_groups(
+            all_detections,
+            gallery_id=args.gallery,
+            min_faces=args.min_faces,
+            include_singletons=args.include_singletons,
+        )
+        if args.limit is not None:
+            groups = groups[: args.limit]
+
+        if not groups:
+            _CONSOLE.print("[dim]No unnamed identities match the filters.[/dim]")
+            return EXIT_SUCCESS
+
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Identity")
+        table.add_column("Faces", justify="right")
+        table.add_column("Sample")
+        table.add_column("More", justify="right")
+
+        total_faces = 0
+        for group in groups:
+            total_faces += group.face_count
+            more = f"(+{group.extra_count})" if group.extra_count else ""
+            table.add_row(
+                group.identity_id,
+                str(group.face_count),
+                group.sample_path,
+                more,
+            )
+
+        _CONSOLE.print(table)
+        _CONSOLE.print(
+            f"  [dim]{len(groups)} group(s), {total_faces} face(s)[/dim]"
+        )
+    finally:
+        os.chdir(Path.cwd())
+
     return EXIT_SUCCESS
 
 

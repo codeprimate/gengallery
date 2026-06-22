@@ -29,6 +29,7 @@ import json
 import os
 import time
 import warnings
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,7 @@ from PIL import Image
 from rich.console import Console
 
 from gengallery.constants import (
+    FACE_ANONYMOUS_IDENTITY_PREFIX,
     FACE_DEFAULT_AUTO_TAG_PREFIX,
     FACE_DEFAULT_CLUSTER_THRESHOLD,
     FACE_DEFAULT_HDBSCAN_MIN_CLUSTER_SIZE,
@@ -45,10 +47,12 @@ from gengallery.constants import (
     FACE_DEFAULT_MIN_DETECTION_CONFIDENCE,
     FACE_DEFAULT_MIN_FACE_SIZE_PX,
     FACE_MODEL_BUNDLE_VERSION,
+    FACE_PROVENANCE_CLUSTER,
     FACE_PROVENANCE_NEGATIVE_BLOCKED,
     FACE_PROVENANCE_POSITIVE,
     FACE_PROVENANCE_UNASSIGNED,
     FACE_SCHEMA_VERSION,
+    FACE_UNASSIGNED_LIST_LABEL,
     FACES_CLUSTERS_LATEST_JSON,
     FACES_CROPS_DIR,
     FACES_DETECTIONS_DIR,
@@ -271,6 +275,116 @@ def _write_detection(data: dict[str, Any]) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     with p.open("w") as fh:
         json.dump(data, fh, indent=2)
+
+
+def load_all_detections() -> dict[str, dict[str, Any]]:
+    """Load all cached detection records keyed by ``gallery_id:image_id``."""
+    source = config["source_path"]
+    gallery_names = sorted(
+        g
+        for g in os.listdir(source)
+        if is_source_gallery_dirname(g) and os.path.isdir(os.path.join(source, g))
+    )
+
+    all_detections: dict[str, dict[str, Any]] = {}
+    for gallery_id in gallery_names:
+        det_dir = _gallery_metadata_dir() / FACES_DETECTIONS_DIR / gallery_id
+        if not det_dir.exists():
+            continue
+        for det_file in sorted(det_dir.glob("*.json")):
+            with det_file.open() as fh:
+                det = json.load(fh)
+            key = f"{det['gallery_id']}:{det['image_id']}"
+            all_detections[key] = det
+    return all_detections
+
+
+@dataclass(frozen=True)
+class UnnamedFaceMember:
+    """One anonymous or unassigned face in a detection record."""
+
+    gallery_id: str
+    source_filename: str
+    face_index: int
+    detection_confidence: float
+
+    @property
+    def image_path(self) -> str:
+        return f"{self.gallery_id}/{self.source_filename}"
+
+
+@dataclass(frozen=True)
+class UnnamedIdentityGroup:
+    """Anonymous cluster or unassigned singleton bucket."""
+
+    identity_id: str
+    members: tuple[UnnamedFaceMember, ...]
+
+    @property
+    def face_count(self) -> int:
+        return len(self.members)
+
+    @property
+    def sample_member(self) -> UnnamedFaceMember:
+        return max(self.members, key=lambda m: m.detection_confidence)
+
+    @property
+    def sample_path(self) -> str:
+        return self.sample_member.image_path
+
+    @property
+    def extra_count(self) -> int:
+        return max(0, self.face_count - 1)
+
+
+def list_unnamed_identity_groups(
+    all_detections: dict[str, dict[str, Any]],
+    *,
+    gallery_id: str | None = None,
+    min_faces: int = 1,
+    include_singletons: bool = True,
+) -> list[UnnamedIdentityGroup]:
+    """Collect anonymous clusters and optional unassigned singleton faces."""
+    by_identity: dict[str, list[UnnamedFaceMember]] = {}
+    unassigned: list[UnnamedFaceMember] = []
+
+    for det in all_detections.values():
+        det_gallery_id = det["gallery_id"]
+        source_filename = det["source_filename"]
+        for face in det.get("faces", []):
+            if gallery_id is not None and det_gallery_id != gallery_id:
+                continue
+
+            member = UnnamedFaceMember(
+                gallery_id=det_gallery_id,
+                source_filename=source_filename,
+                face_index=face["face_index"],
+                detection_confidence=float(face["detection_confidence"]),
+            )
+            provenance = face.get("provenance", FACE_PROVENANCE_UNASSIGNED)
+            identity_id = face.get("identity_id")
+
+            if (
+                provenance == FACE_PROVENANCE_CLUSTER
+                and identity_id
+                and str(identity_id).startswith(FACE_ANONYMOUS_IDENTITY_PREFIX)
+            ):
+                by_identity.setdefault(str(identity_id), []).append(member)
+            elif provenance == FACE_PROVENANCE_UNASSIGNED:
+                unassigned.append(member)
+
+    groups = [
+        UnnamedIdentityGroup(identity_id, tuple(members))
+        for identity_id, members in by_identity.items()
+    ]
+    if include_singletons and unassigned:
+        groups.append(
+            UnnamedIdentityGroup(FACE_UNASSIGNED_LIST_LABEL, tuple(unassigned))
+        )
+
+    filtered = [group for group in groups if group.face_count >= min_faces]
+    filtered.sort(key=lambda group: (-group.face_count, group.identity_id))
+    return filtered
 
 
 # ---------------------------------------------------------------------------
@@ -958,23 +1072,7 @@ def recluster() -> int:
         "hdbscan_min_cluster_size", FACE_DEFAULT_HDBSCAN_MIN_CLUSTER_SIZE
     )
 
-    source = config["source_path"]
-    gallery_names = sorted(
-        g
-        for g in os.listdir(source)
-        if is_source_gallery_dirname(g) and os.path.isdir(os.path.join(source, g))
-    )
-
-    all_detections: dict[str, dict] = {}
-    for gallery_id in gallery_names:
-        det_dir = _gallery_metadata_dir() / FACES_DETECTIONS_DIR / gallery_id
-        if not det_dir.exists():
-            continue
-        for det_file in sorted(det_dir.glob("*.json")):
-            with det_file.open() as fh:
-                det = json.load(fh)
-            key = f"{det['gallery_id']}:{det['image_id']}"
-            all_detections[key] = det
+    all_detections = load_all_detections()
 
     embeddings: dict[str, np.ndarray] = {}
     all_faces = []
@@ -1031,23 +1129,7 @@ def propagate(dry_run: bool = False, identity_filter: str | None = None) -> list
     face_cfg: dict = config.get("faces", {})
     match_threshold = face_cfg.get("match_threshold", FACE_DEFAULT_MATCH_THRESHOLD)
 
-    source = config["source_path"]
-    gallery_names = sorted(
-        g
-        for g in os.listdir(source)
-        if is_source_gallery_dirname(g) and os.path.isdir(os.path.join(source, g))
-    )
-
-    all_detections: dict[str, dict] = {}
-    for gallery_id in gallery_names:
-        det_dir = _gallery_metadata_dir() / FACES_DETECTIONS_DIR / gallery_id
-        if not det_dir.exists():
-            continue
-        for det_file in sorted(det_dir.glob("*.json")):
-            with det_file.open() as fh:
-                det = json.load(fh)
-            key = f"{det['gallery_id']}:{det['image_id']}"
-            all_detections[key] = det
+    all_detections = load_all_detections()
 
     embeddings: dict[str, np.ndarray] = {}
     all_faces = []

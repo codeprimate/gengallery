@@ -19,6 +19,7 @@ CMD_FACES_SHOW = "show"
 CMD_FACES_MERGE = "merge"
 CMD_FACES_RECLUSTER = "recluster"
 CMD_FACES_PROPAGATE = "propagate"
+CMD_FACES_LIST_UNNAMED = "list-unnamed"
 
 # Push provider identifiers (extensible; only ssh is registered in this release)
 PUSH_PROVIDER_SSH = "ssh"
@@ -80,6 +81,7 @@ FACE_DEFAULT_MIN_FACE_SIZE_PX = 40
 FACE_DEFAULT_MIN_DETECTION_CONFIDENCE = 0.50
 FACE_DEFAULT_AUTO_TAG_PREFIX = "person:"
 FACE_ANONYMOUS_IDENTITY_PREFIX = "id_unnamed_"
+FACE_UNASSIGNED_LIST_LABEL = "unassigned"
 FACE_DEFAULT_HDBSCAN_MIN_CLUSTER_SIZE = 2
 
 # Face identity slug pattern

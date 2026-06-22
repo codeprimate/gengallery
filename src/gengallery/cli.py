@@ -19,6 +19,7 @@ from gengallery.constants import (
     CLI_APP_NAME,
     CMD_FACES,
     CMD_FACES_ASSIGN,
+    CMD_FACES_LIST_UNNAMED,
     CMD_FACES_MERGE,
     CMD_FACES_PROPAGATE,
     CMD_FACES_RECLUSTER,
@@ -243,6 +244,40 @@ def _add_faces_parser(subparsers: argparse._SubParsersAction) -> None:  # type: 
     )
     propagate_p.add_argument(**_path_arg)
     propagate_p.set_defaults(handler=cmd_faces.run_propagate)
+
+    # list-unnamed
+    list_unnamed_p = faces_subparsers.add_parser(
+        CMD_FACES_LIST_UNNAMED,
+        help="List anonymous identity clusters for tagging.",
+    )
+    list_unnamed_p.add_argument(
+        "--min-faces",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Minimum faces per group (default: 1).",
+    )
+    list_unnamed_p.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Maximum number of groups to show.",
+    )
+    list_unnamed_p.add_argument(
+        "--gallery",
+        default=None,
+        metavar="GALLERY_ID",
+        help="Only include faces from this gallery.",
+    )
+    list_unnamed_p.add_argument(
+        "--include-singletons",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Include unassigned singleton faces (default: include).",
+    )
+    list_unnamed_p.add_argument(**_path_arg)
+    list_unnamed_p.set_defaults(handler=cmd_faces.run_list_unnamed)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

@@ -68,6 +68,15 @@ def test_update_yields_update_run():
     assert args.handler is cmd_update.run
 
 
+def test_faces_list_unnamed_yields_handler():
+    from gengallery.commands import faces as cmd_faces
+
+    args = parse_args(["faces", "list-unnamed"])
+    assert args.handler is cmd_faces.run_list_unnamed
+    assert args.min_faces == 1
+    assert args.include_singletons is True
+
+
 def test_unknown_subcommand_exits_nonzero():
     parser = build_parser()
     with pytest.raises(SystemExit) as exc_info:
