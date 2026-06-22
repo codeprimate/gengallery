@@ -18,6 +18,7 @@ from gengallery.services.scaffold_assets import (
     ScaffoldTargetExistsError,
     iter_scaffold_files,
     materialize_scaffold,
+    sync_packaged_templates,
 )
 
 
@@ -87,3 +88,18 @@ def test_read_bytes_failure_surfaces_as_packaging_error(
     monkeypatch.setattr(sa, "iter_scaffold_files", fake_iter)
     with pytest.raises(ScaffoldPackagingError, match="failed to read packaged resource"):
         materialize_scaffold(tmp_path)
+
+
+def test_sync_packaged_templates_overwrites_project_templates(tmp_path: Path) -> None:
+    templates_dir = tmp_path / TEMPLATES_DIRNAME
+    templates_dir.mkdir()
+    stale = templates_dir / "gallery.html.jinja"
+    stale.write_text("stale template\n", encoding="utf-8")
+
+    written = sync_packaged_templates(tmp_path)
+
+    assert written > 0
+    assert "person_pills" in stale.read_text(encoding="utf-8") or "gallery_person_slugs" in stale.read_text(
+        encoding="utf-8"
+    )
+    assert (templates_dir / "person_pills.html.jinja").is_file()

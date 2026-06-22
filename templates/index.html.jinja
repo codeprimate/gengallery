@@ -54,9 +54,11 @@
                         {% if gallery.description %}
                         <div class="mt-2 text-gray-500 markdown-content">{{ gallery.description | markdown | safe }}</div>
                         {% endif %}
-                        <div class="mt-4">
+                        <div class="tag-list mt-4">
                             {% for tag in gallery.tags %}
-                            <a href="/{{ generate_tag_hash(tag) }}.html" class="inline-block bg-gray-200 rounded-full px-3 py-1 text-sm font-semibold text-gray-700 mr-2 mb-2 hover:bg-gray-300 transition duration-300">#{{ tag }}</a>
+                            <a href="/{{ generate_tag_hash(tag) }}.html" class="tag-pill">
+                                <span class="tag-pill__hash">#</span>{{ tag }}
+                            </a>
                             {% endfor %}
                         </div>
                         {% endif %}

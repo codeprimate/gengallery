@@ -148,6 +148,13 @@ def generate_image_id(image_path: str, gallery_id: str) -> str:
     unique_string = f"{gallery_id}:{image_path}"
     return hashlib.md5(unique_string.encode()).hexdigest()[:12]
 
+
+def resolve_image_id(gallery_id: str, filename: str, is_encrypted: bool) -> str:
+    """Return the canonical image ID used by export metadata and face detection."""
+    if is_encrypted:
+        return hashlib.sha256(f"{gallery_id}:{filename}".encode()).hexdigest()[:16]
+    return generate_image_id(filename, gallery_id)
+
 def get_pil_exif_data(img: Image.Image) -> dict:
     """
     Extract EXIF data from a PIL Image object.
@@ -581,8 +588,7 @@ def process_image(image_path: str, gallery_id: str, gallery_config: dict) -> tup
     filename = os.path.basename(image_path)
     
     is_encrypted = gallery_config.get('encrypted', False)
-    image_id = (hashlib.sha256(f"{gallery_id}:{filename}".encode()).hexdigest()[:16] 
-                if is_encrypted else generate_image_id(filename, gallery_id))
+    image_id = resolve_image_id(gallery_id, filename, is_encrypted)
 
     if check_output_files(image_path, gallery_id, image_id, is_encrypted):
         metadata_path = os.path.join(config['output_path'], 'metadata', gallery_id, f"{image_id}.json")

@@ -13,6 +13,11 @@ import hashlib
 from rich.console import Console
 
 from gengallery.services.pipeline_types import OutputPath, SiteBuildResult
+from gengallery.services.template_helpers import (
+    build_template_globals,
+    load_identity_display_names,
+)
+from gengallery.constants import FACE_DEFAULT_AUTO_TAG_PREFIX
 from gengallery.services.site_htpasswd import (
     SITE_HTPASSWD_FILENAME,
     SiteHtpasswdError,
@@ -76,6 +81,18 @@ def generate_tailwind_css(quiet=False):
 def generate_tag_hash(tag):
     """Generate a short hash for a tag name."""
     return hashlib.sha256(tag.encode()).hexdigest()[:12]
+
+
+def create_jinja_environment(config: dict | None = None) -> Environment:
+    """Create a Jinja environment with shared template globals."""
+    env = Environment(loader=FileSystemLoader('templates'))
+    env.filters['markdown'] = markdown_filter
+    face_cfg = (config or {}).get("faces", {})
+    auto_tag_prefix = face_cfg.get("auto_tag_prefix", FACE_DEFAULT_AUTO_TAG_PREFIX)
+    display_names = load_identity_display_names()
+    env.globals.update(build_template_globals(display_names, auto_tag_prefix))
+    env.globals["generate_tag_hash"] = generate_tag_hash
+    return env
 
 def generate_gallery_listing_pages(config, galleries_data, output_path, env) -> dict[str, int]:
     """
@@ -267,9 +284,8 @@ def generate_gallery_pages(config, galleries_data, output_path) -> list[dict]:
     Returns:
         list of gallery summary dicts for each processed gallery.
     """
-    env = Environment(loader=FileSystemLoader('templates'))
-    env.filters['markdown'] = markdown_filter
-    
+    env = create_jinja_environment(config)
+
     templates = get_gallery_templates(env)
     gallery_summaries = []
 
@@ -409,9 +425,7 @@ def run() -> SiteBuildResult:
     cfg = load_config()
     galleries_data = load_galleries_data(cfg['output_path'])
 
-    env = Environment(loader=FileSystemLoader('templates'))
-    env.filters['markdown'] = markdown_filter
-    env.globals['generate_tag_hash'] = generate_tag_hash
+    env = create_jinja_environment(cfg)
 
     tags = generate_gallery_listing_pages(cfg, galleries_data, cfg['output_path'], env)
     gallery_summaries = generate_gallery_pages(cfg, galleries_data, cfg['output_path'])

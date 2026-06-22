@@ -1,0 +1,16 @@
+{%- if person_slugs %}
+<div class="person-tag-list {{ wrapper_class | default('') }}">
+{%- for slug in person_slugs %}
+{%- if link_tags | default(true) %}
+<a href="/{{ generate_tag_hash(person_auto_tag(slug)) }}.html" class="person-pill{% if compact | default(false) %} person-pill--compact{% endif %}">
+{%- else %}
+<span class="person-pill{% if compact | default(false) %} person-pill--compact{% endif %}">
+{%- endif %}
+{%- if not (compact | default(false)) %}
+<svg class="person-pill__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+{%- endif %}
+{{- identity_display_name(slug) -}}
+{%- if link_tags | default(true) %}</a>{% else %}</span>{% endif %}
+{%- endfor %}
+</div>
+{%- endif %}

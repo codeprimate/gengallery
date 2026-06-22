@@ -56,13 +56,18 @@
                         {% if gallery.description %}
                         <div class="mt-2 text-gray-500 markdown-content">{{ gallery.description | markdown | safe }}</div>
                         {% endif %}
-                        <div class="mt-4">
+                        {% if gallery.tags %}
+                        <div class="tag-list mt-4">
                             {% for tag in gallery.tags %}
-                            <span
-                                class="inline-block bg-gray-200 rounded-full px-3 py-1 text-sm font-semibold text-gray-700 mr-2 mb-2">#{{
-                                tag }}</span>
+                            <a href="/{{ generate_tag_hash(tag) }}.html" class="tag-pill">
+                                <span class="tag-pill__hash">#</span>{{ tag }}
+                            </a>
                             {% endfor %}
                         </div>
+                        {% endif %}
+                        {% with person_slugs=gallery_person_slugs(gallery), wrapper_class='mt-3', link_tags=true %}
+                        {% include 'person_pills.html.jinja' %}
+                        {% endwith %}
                     </div>
                     <div class="mt-4">
                         <p class="text-sm text-gray-600">
@@ -121,6 +126,9 @@
                     <h3 class="text-lg font-semibold text-gray-800">
                         <a href="{{ item.url }}" class="hover:underline">{{ item.title }}</a>
                     </h3>
+                    {% with person_slugs=person_slugs_for_media_item(item), wrapper_class='mt-1', link_tags=true, compact=true %}
+                    {% include 'person_pills.html.jinja' %}
+                    {% endwith %}
                     {% if item.caption %}
                     <blockquote class="text-md leading-tight">{{ item.caption }}</blockquote>
                     {% endif %}

@@ -86,6 +86,7 @@ from gengallery.services.face_models import (
 from gengallery.services.image_processor import (
     SUPPORTED_FORMATS,
     config,
+    resolve_image_id,
     rotate_image,
 )
 from gengallery.services.pipeline_types import FaceStageResult
@@ -674,6 +675,39 @@ def export_faces_to_image_metadata(
             json.dump(image_meta, fh, indent=2)
 
 
+def _sync_tags_to_export_metadata(
+    all_detections: dict[str, dict[str, Any]],
+) -> None:
+    """Copy sidecar YAML tags into export/metadata image JSON after auto-tag sync."""
+    source = config["source_path"]
+
+    for det in all_detections.values():
+        gallery_id = det["gallery_id"]
+        image_id = det["image_id"]
+        source_filename = det["source_filename"]
+        image_path = os.path.join(source, gallery_id, source_filename)
+        sidecar_path = os.path.splitext(image_path)[0] + ".yaml"
+
+        tags: list[str] = []
+        if os.path.exists(sidecar_path):
+            with open(sidecar_path) as fh:
+                sidecar = yaml.safe_load(fh) or {}
+            raw_tags = sidecar.get("tags") or []
+            if isinstance(raw_tags, list):
+                tags = [str(tag) for tag in raw_tags]
+
+        export_path = _export_image_metadata_path(gallery_id, image_id)
+        if not export_path.exists():
+            continue
+        with export_path.open() as fh:
+            image_meta = json.load(fh)
+        if image_meta.get("tags") == tags:
+            continue
+        image_meta["tags"] = tags
+        with export_path.open("w") as fh:
+            json.dump(image_meta, fh, indent=2)
+
+
 # ---------------------------------------------------------------------------
 # Embedding loader (used by face_matching)
 # ---------------------------------------------------------------------------
@@ -725,10 +759,16 @@ def run() -> FaceStageResult:
     all_image_paths: list[tuple[str, str, str]] = []  # (gallery_id, image_id, abs_path)
     for gallery_id in gallery_names:
         gallery_path = os.path.join(source, gallery_id)
+        gallery_yaml_path = os.path.join(gallery_path, "gallery.yaml")
+        is_encrypted = False
+        if os.path.exists(gallery_yaml_path):
+            with open(gallery_yaml_path) as gallery_yaml_file:
+                gallery_config = yaml.safe_load(gallery_yaml_file) or {}
+            is_encrypted = bool(gallery_config.get("encrypted", False))
         for filename in sorted(os.listdir(gallery_path)):
             if not filename.lower().endswith(SUPPORTED_FORMATS):
                 continue
-            image_id = hashlib.md5(f"{gallery_id}:{filename}".encode()).hexdigest()[:12]
+            image_id = resolve_image_id(gallery_id, filename, is_encrypted)
             all_image_paths.append((gallery_id, image_id, os.path.join(gallery_path, filename)))
 
     images_processed = 0
@@ -886,6 +926,9 @@ def run() -> FaceStageResult:
 
         # ── Phase 10: sync auto-tags ────────────────────────────────────────
         _sync_auto_tags(all_detections, auto_tag_prefix)
+
+        # ── Phase 11: sync sidecar tags to export metadata ──────────────────
+        _sync_tags_to_export_metadata(all_detections)
 
     return FaceStageResult(
         images_processed=images_processed,

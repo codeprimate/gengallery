@@ -38,12 +38,14 @@ from gengallery.services.image_processor import config
 from gengallery.services.pipeline_types import GalleryIndexResult
 from gengallery.constants import (
     EXPORT_GALLERY_IDENTITIES_FIELD,
+    FACE_DEFAULT_AUTO_TAG_PREFIX,
     FACES_CROPS_DIR,
     FACES_DETECTIONS_DIR,
     FACES_EMBEDDINGS_DIR,
     GALLERIES_METADATA_DIR,
 )
 from gengallery.services.gallery_paths import is_source_gallery_dirname
+from gengallery.services.template_helpers import person_slugs_from_tags
 
 console = Console()
 
@@ -132,13 +134,17 @@ def cleanup_missing_video(gallery_id: str, video_metadata: dict, source_path: st
 
 
 def identities_from_items(items: list[dict]) -> list[str]:
-    """Collect distinct identity slugs from image/video faces[] export fields."""
+    """Collect distinct identity slugs from faces[] and person:* tags on media items."""
+    auto_tag_prefix = config.get("faces", {}).get(
+        "auto_tag_prefix", FACE_DEFAULT_AUTO_TAG_PREFIX
+    )
     slugs: set[str] = set()
     for item in items:
         for face in item.get("faces", []):
             identity_id = face.get("identity_id")
             if identity_id:
-                slugs.add(identity_id)
+                slugs.add(str(identity_id))
+        slugs.update(person_slugs_from_tags(item.get("tags"), auto_tag_prefix))
     return sorted(slugs)
 
 

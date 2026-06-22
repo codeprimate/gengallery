@@ -83,6 +83,9 @@
                 Caption:
                 <span class="encrypted-meta-field font-medium text-gray-800" data-field="caption" data-fallback=""></span>
             </p>
+            {% with person_slugs=person_slugs_for_media_item(image), wrapper_class='mt-4', link_tags=false %}
+            {% include 'person_pills.html.jinja' %}
+            {% endwith %}
         </section>
 
         <!-- SVG Placeholders (hidden) -->

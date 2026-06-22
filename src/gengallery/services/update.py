@@ -20,6 +20,7 @@ from gengallery.services import (
     video_processor,
 )
 from gengallery.services.image_processor import apply_runtime_config
+from gengallery.services.scaffold_assets import sync_packaged_templates
 from gengallery.services.pipeline_types import (
     FaceStageResult,
     GalleryIndexResult,
@@ -262,6 +263,7 @@ def run_update(project_root: Path, config: dict) -> None:
 
             # ── Stage 5: Site Build ───────────────────────────────────────
             _CONSOLE.print(f"\n  [bold]\\[5/{_STAGE_TOTAL}][/bold]  [cyan]Site Build[/cyan]")
+            sync_packaged_templates(project_root)
             site_result = generator.run()
             _print_site_build_result(site_result)
 

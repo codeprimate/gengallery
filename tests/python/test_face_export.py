@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import yaml
+
 from gengallery.constants import EXPORT_IMAGE_FACES_FIELD, GALLERIES_METADATA_DIR
 from gengallery.services.face_processor import (
     detection_to_export_faces,
@@ -118,3 +120,42 @@ def test_export_faces_to_image_metadata_writes_empty_array_when_no_faces(
 
     updated = json.loads(image_meta_path.read_text())
     assert updated[EXPORT_IMAGE_FACES_FIELD] == []
+
+
+def test_sync_tags_to_export_metadata_copies_sidecar_tags(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source_gallery = tmp_path / "galleries" / "example"
+    source_gallery.mkdir(parents=True)
+    (source_gallery / "photo.jpg").write_bytes(b"fake")
+    (source_gallery / "photo.yaml").write_text(
+        yaml.dump({"tags": ["vacation", "person:alice"]})
+    )
+
+    output = tmp_path / "export" / "metadata" / "example"
+    output.mkdir(parents=True)
+    image_meta_path = output / "img001.json"
+    image_meta_path.write_text(json.dumps({"id": "img001", "tags": []}))
+
+    config = {
+        "source_path": str(tmp_path / "galleries"),
+        "output_path": str(tmp_path / "export"),
+    }
+    from gengallery.services import image_processor as ip
+    from gengallery.services.face_processor import _sync_tags_to_export_metadata
+
+    ip.apply_runtime_config(config)
+    monkeypatch.chdir(tmp_path)
+
+    all_detections = {
+        "example:img001": {
+            "gallery_id": "example",
+            "image_id": "img001",
+            "source_filename": "photo.jpg",
+            "faces": [],
+        }
+    }
+    _sync_tags_to_export_metadata(all_detections)
+
+    updated = json.loads(image_meta_path.read_text())
+    assert updated["tags"] == ["vacation", "person:alice"]

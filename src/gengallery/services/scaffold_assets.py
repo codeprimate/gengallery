@@ -64,6 +64,40 @@ def iter_scaffold_files() -> Iterable[tuple[str, Traversable]]:
     yield from _walk_files(templates_root, TEMPLATES_DIRNAME)
 
 
+def iter_packaged_template_files() -> Iterable[tuple[str, Traversable]]:
+    """Yield ``(relative_posix_path, traversable)`` for each packaged template file."""
+    root = _assets_root()
+    templates_root = root / TEMPLATES_DIRNAME
+    if not templates_root.is_dir():
+        msg = f"missing packaged directory {TEMPLATES_DIRNAME!r} under {ASSETS_PACKAGE}"
+        raise ScaffoldPackagingError(msg)
+    yield from _walk_files(templates_root, TEMPLATES_DIRNAME)
+
+
+def sync_packaged_templates(target_root: Path) -> int:
+    """
+    Copy packaged template files into ``target_root/templates/``, overwriting existing files.
+
+    Returns:
+        Number of template files written.
+    """
+    dest_root = target_root.resolve()
+    written = 0
+    for rel_posix, resource in iter_packaged_template_files():
+        dest = dest_root / rel_posix
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            payload = resource.read_bytes()
+        except OSError as exc:
+            msg = f"failed to read packaged resource {rel_posix!r}: {exc}"
+            raise ScaffoldPackagingError(msg) from exc
+        dest.write_bytes(payload)
+        written += 1
+    if written == 0:
+        raise ScaffoldPackagingError("no packaged template files were found")
+    return written
+
+
 def materialize_scaffold(target_root: Path, *, overwrite: bool = False) -> int:
     """
     Copy all packaged scaffold files under ``target_root``.
