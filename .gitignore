@@ -1,5 +1,6 @@
 # --- Local / secrets (never commit) ---
 config.yaml
+_local_docs/
 
 # --- Virtual environments ---
 .venv/
