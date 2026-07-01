@@ -127,7 +127,8 @@ def test_apply_runtime_config_populates_shared_config(tmp_path: Path, monkeypatc
 
     from gengallery.services import image_processor as ip
 
-    cfg = {"source_path": "s", "output_path": "o", "site_name": "t"}
+    cfg = {"source_path": "s", "output_path": "o", "site_name": "t", "base_path": "/gallery/"}
     run_update(tmp_path, cfg)
     assert ip.config.get("site_name") == "t"
     assert ip.config.get("source_path") == "s"
+    assert ip.config.get("base_path") == "/gallery"

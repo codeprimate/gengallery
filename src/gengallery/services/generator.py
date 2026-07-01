@@ -23,6 +23,7 @@ from gengallery.services.site_htpasswd import (
     SiteHtpasswdError,
     write_site_htpasswd_from_config,
 )
+from gengallery.services.urls import base_path_from_config, normalize_base_path
 
 console = Console()
 PROTECTED_PAGE_HASH_LENGTH = 16
@@ -56,7 +57,9 @@ def neighbors_in_timeline(timeline: list, item_id: str) -> tuple:
 def load_config():
     """Load and parse the YAML configuration file."""
     with open('config.yaml', 'r') as f:
-        return yaml.safe_load(f)
+        data = yaml.safe_load(f)
+    data["base_path"] = normalize_base_path(data.get("base_path"))
+    return data
 
 def load_galleries_data(output_path):
     """Load the galleries metadata from JSON."""
@@ -92,6 +95,7 @@ def create_jinja_environment(config: dict | None = None) -> Environment:
     display_names = load_identity_display_names()
     env.globals.update(build_template_globals(display_names, auto_tag_prefix))
     env.globals["generate_tag_hash"] = generate_tag_hash
+    env.globals["base_path"] = base_path_from_config(config)
     return env
 
 def generate_gallery_listing_pages(config, galleries_data, output_path, env) -> dict[str, int]:
@@ -354,7 +358,7 @@ def generate_gallery_pages(config, galleries_data, output_path) -> list[dict]:
 
 def generate_404_page(config, output_path):
     """Generate the 404 error page."""
-    env = Environment(loader=FileSystemLoader('templates'))
+    env = create_jinja_environment(config)
     template = env.get_template('404.html.jinja')
 
     context = {

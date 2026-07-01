@@ -8,6 +8,7 @@ import yaml
 
 from gengallery.constants import CONFIG_FILENAME
 from gengallery.errors import CliUserError
+from gengallery.services.urls import normalize_base_path
 
 
 def normalize_cli_project_path(raw: str | None, cwd: Path) -> Path:
@@ -52,4 +53,5 @@ def load_project_config(project_root: Path) -> dict:
         raise CliUserError(
             f"Configuration must be a YAML mapping (object), not {type(data).__name__}: {path}",
         )
+    data["base_path"] = normalize_base_path(data.get("base_path"))
     return data

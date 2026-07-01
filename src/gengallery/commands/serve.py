@@ -15,7 +15,6 @@ from gengallery.errors import CliUserError
 from gengallery.pathing import load_project_config
 from gengallery.services.serve import resolve_serve_directory, run_serve
 
-
 def run(project_root: Path, args: argparse.Namespace) -> int:
     """Serve ``public_html`` after CLI validation (tree exists)."""
     port = int(args.port)
@@ -25,5 +24,6 @@ def run(project_root: Path, args: argparse.Namespace) -> int:
         )
     config = load_project_config(project_root)
     serve_dir = resolve_serve_directory(project_root, config)
-    run_serve(serve_dir, host=SERVE_BIND_HOST, port=port)
+    base_path = config.get("base_path", "") or ""
+    run_serve(serve_dir, host=SERVE_BIND_HOST, port=port, base_path=base_path)
     return EXIT_SUCCESS

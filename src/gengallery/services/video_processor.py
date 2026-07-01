@@ -32,6 +32,7 @@ from gengallery.services.image_processor import (
 )
 from gengallery.services.pipeline_types import VideoStageResult
 from gengallery.services.progress_display import create_file_progress, set_file_task_description
+from gengallery.services.urls import base_path_from_config, url
 from gengallery.services.video_encoding import (
     VIDEO_MAX_DURATION_SECONDS,
     build_aac_audio_args,
@@ -164,13 +165,14 @@ def create_video_metadata_dict(
     playback_ext = ".mp4" if not is_encrypted else variant_ext
     thumb_ext = ".jpg" if not is_encrypted else variant_ext
     title_default = os.path.splitext(basename)[0].replace("_", " ").title()
+    bp = base_path_from_config(config)
     meta = {
         "media_type": "video",
         "id": video_id,
         "filename": basename,
-        "url": f"/galleries/{gallery_id}/{video_id}.html",
-        "thumbnail_path": f"/galleries/{gallery_id}/thumbnail/{video_id}{thumb_ext}",
-        "playback_path": f"/galleries/{gallery_id}/video/{video_id}{playback_ext}",
+        "url": url(f"/galleries/{gallery_id}/{video_id}.html", bp),
+        "thumbnail_path": url(f"/galleries/{gallery_id}/thumbnail/{video_id}{thumb_ext}", bp),
+        "playback_path": url(f"/galleries/{gallery_id}/video/{video_id}{playback_ext}", bp),
         "title": sidecar.get("title", title_default),
         "caption": sidecar.get("caption", ""),
         "tags": sidecar.get("tags", []) if isinstance(sidecar.get("tags"), list) else [],
@@ -180,7 +182,7 @@ def create_video_metadata_dict(
     }
     if is_encrypted:
         meta["metadata_path"] = (
-            f"/galleries/{gallery_id}/{METADATA_VARIANT_DIR}/{video_id}{METADATA_BLOB_EXTENSION}"
+            url(f"/galleries/{gallery_id}/{METADATA_VARIANT_DIR}/{video_id}{METADATA_BLOB_EXTENSION}", bp)
         )
     return meta
 

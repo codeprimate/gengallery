@@ -71,7 +71,14 @@ def test_load_project_config_ok(tmp_path: Path):
     cfg = tmp_path / CONFIG_FILENAME
     cfg.write_text("site_name: x\n", encoding="utf-8")
     data = load_project_config(tmp_path)
-    assert data == {"site_name": "x"}
+    assert data == {"site_name": "x", "base_path": ""}
+
+
+def test_load_project_config_normalizes_root_only_base_path(tmp_path: Path):
+    cfg = tmp_path / CONFIG_FILENAME
+    cfg.write_text('site_name: x\nbase_path: "/"\n', encoding="utf-8")
+    data = load_project_config(tmp_path)
+    assert data["base_path"] == ""
 
 
 def test_validate_existing_project_requires_source_dir(tmp_path: Path):

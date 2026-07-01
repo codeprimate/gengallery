@@ -2,7 +2,7 @@
 <div class="person-tag-list {{ wrapper_class | default('') }}">
 {%- for slug in person_slugs %}
 {%- if link_tags | default(true) %}
-<a href="/{{ generate_tag_hash(person_auto_tag(slug)) }}.html" class="person-pill{% if compact | default(false) %} person-pill--compact{% endif %}">
+<a href="{{ base_path }}/{{ generate_tag_hash(person_auto_tag(slug)) }}.html" class="person-pill{% if compact | default(false) %} person-pill--compact{% endif %}">
 {%- else %}
 <span class="person-pill{% if compact | default(false) %} person-pill--compact{% endif %}">
 {%- endif %}

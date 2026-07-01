@@ -23,7 +23,7 @@ The **gengallery** command is the supported entrypoint (console script from this
 
    Then edit `config.yaml` and add content under `galleries/` as below.
 
-2. **Existing project:** copy `config.example.yaml` to `config.yaml` if you do not already have one, and adjust paths and settings.
+2. **Existing project:** copy the example config template `config.yaml.example` to `config.yaml` if you do not already have one, and adjust paths and settings.
 
 3. Install Python dependencies with uv:
    ```bash

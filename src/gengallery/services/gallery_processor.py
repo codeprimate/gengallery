@@ -46,6 +46,7 @@ from gengallery.constants import (
 )
 from gengallery.services.gallery_paths import is_source_gallery_dirname
 from gengallery.services.template_helpers import person_slugs_from_tags
+from gengallery.services.urls import base_path_from_config, url
 
 console = Console()
 
@@ -242,12 +243,21 @@ def get_variant_url(image_metadata: dict, gallery_id: str, variant_name: str) ->
     """Resolve variant URL from image metadata, with deterministic fallback."""
     variant_path_key = f'{variant_name}_path'
     if variant_name == 'full':
-        return image_metadata.get('path', '')
+        stored = image_metadata.get('path', '')
+        if stored:
+            return stored
     if variant_path_key in image_metadata:
-        return image_metadata.get(variant_path_key, '')
+        stored = image_metadata.get(variant_path_key, '')
+        if stored:
+            return stored
 
-    image_extension = os.path.splitext(image_metadata.get('path', ''))[1] or '.enc'
-    return f"/galleries/{gallery_id}/{variant_name}/{image_metadata['id']}{image_extension}"
+    bp = base_path_from_config(config)
+    raw_path = image_metadata.get('path', '')
+    image_extension = os.path.splitext(raw_path)[1] or '.enc'
+    return url(
+        f"/galleries/{gallery_id}/{variant_name}/{image_metadata['id']}{image_extension}",
+        bp,
+    )
 
 def create_manifest_dict(gallery_data: dict) -> dict:
     """Create public encrypted manifest (schema v2) from gallery metadata."""
@@ -319,7 +329,8 @@ def write_manifest_file(gallery_data: dict) -> str:
     os.makedirs(os.path.dirname(manifest_output_path), exist_ok=True)
     with open(manifest_output_path, 'w') as manifest_file:
         json.dump(create_manifest_dict(gallery_data), manifest_file, indent=2)
-    return f"/galleries/{gallery_data['id']}/{MANIFEST_FILENAME}"
+    bp = base_path_from_config(config)
+    return url(f"/galleries/{gallery_data['id']}/{MANIFEST_FILENAME}", bp)
 
 def process_gallery(gallery_path: str) -> dict:
     """

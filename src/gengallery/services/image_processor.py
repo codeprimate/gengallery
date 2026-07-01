@@ -71,6 +71,7 @@ from gengallery.services.crypto_v1 import (
 from gengallery.services.envelope_v1 import decrypt_payload, encrypt_payload
 from gengallery.services.pipeline_types import ImageStageResult
 from gengallery.services.progress_display import create_file_progress, set_file_task_description
+from gengallery.services.urls import base_path_from_config, normalize_base_path, url
 
 # Suppress specific warnings
 warnings.filterwarnings("ignore", category=Image.DecompressionBombWarning)
@@ -103,6 +104,7 @@ def apply_runtime_config(data: dict) -> None:
     """Populate config before pipeline stages; mutates this dict in place for import aliases."""
     config.clear()
     config.update(data)
+    config["base_path"] = normalize_base_path(config.get("base_path"))
 
 
 console = Console()
@@ -468,13 +470,14 @@ def create_metadata_dict(image_path: str, image_id: str, gallery_id: str,
     filename = os.path.basename(image_path)
     
     variant_extension = get_variant_extension(is_encrypted)
+    bp = base_path_from_config(config)
     metadata = {
         "id": image_id,
         "filename": filename,
-        "url": f"/galleries/{gallery_id}/{image_id}.html",
-        "path": f"/galleries/{gallery_id}/full/{image_id}{variant_extension}",
-        "thumbnail_path": f"/galleries/{gallery_id}/thumbnail/{image_id}{variant_extension}",
-        "cover_path": f"/galleries/{gallery_id}/cover/{image_id}{variant_extension}",
+        "url": url(f"/galleries/{gallery_id}/{image_id}.html", bp),
+        "path": url(f"/galleries/{gallery_id}/full/{image_id}{variant_extension}", bp),
+        "thumbnail_path": url(f"/galleries/{gallery_id}/thumbnail/{image_id}{variant_extension}", bp),
+        "cover_path": url(f"/galleries/{gallery_id}/cover/{image_id}{variant_extension}", bp),
         "title": image_metadata.get('title', os.path.splitext(filename)[0].replace('_', ' ').title()),
         "caption": image_metadata.get('caption', ''),
         "tags": image_metadata.get('tags', []),
@@ -483,7 +486,7 @@ def create_metadata_dict(image_path: str, image_id: str, gallery_id: str,
         "exif": exif_data
     }
     if is_encrypted:
-        metadata["metadata_path"] = f"/galleries/{gallery_id}/{METADATA_VARIANT_DIR}/{image_id}{METADATA_BLOB_EXTENSION}"
+        metadata["metadata_path"] = url(f"/galleries/{gallery_id}/{METADATA_VARIANT_DIR}/{image_id}{METADATA_BLOB_EXTENSION}", bp)
     return metadata
 
 def create_public_metadata_dict(output_metadata: dict, is_encrypted: bool) -> dict:

@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Private Video - {{ site_name }}</title>
-    <link href="/css/tailwind.css" rel="stylesheet">
-    <link href="/css/site.css" rel="stylesheet">
-    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <link href="{{ base_path }}/css/tailwind.css" rel="stylesheet">
+    <link href="{{ base_path }}/css/site.css" rel="stylesheet">
+    <link rel="icon" type="image/x-icon" href="{{ base_path }}/favicon.ico">
     <meta name="robots" content="noindex, nofollow">
     <meta name="encrypted-gallery" content="true">
     <meta name="encrypted-manifest-url" content="{{ gallery.manifest_path }}">
@@ -15,7 +15,7 @@
     <header class="bg-white shadow-md">
         <div class="container mx-auto px-4 py-6">
             <h1 class="text-3xl font-bold text-gray-800">
-                <a href="/">{{ site_name }}</a>
+                <a href="{{ base_path + '/' if base_path else '/' }}">{{ site_name }}</a>
             </h1>
             <p class="text-gray-600">by {{ author }}</p>
         </div>
@@ -23,7 +23,7 @@
 
     <main class="container mx-auto px-4 py-8">
         <nav class="mb-4">
-            <a href="/galleries/{{ gallery.id }}/{{ protected_gallery_page }}#{{ video.id }}" class="text-blue-500 hover:underline">&larr; Back to {{ gallery.title }}</a>
+            <a href="{{ base_path }}/galleries/{{ gallery.id }}/{{ protected_gallery_page }}#{{ video.id }}" class="text-blue-500 hover:underline">&larr; Back to {{ gallery.title }}</a>
         </nav>
 
         <div class="bg-white rounded-lg shadow-md overflow-hidden relative">
@@ -90,7 +90,7 @@
         </div>
     </footer>
 
-    <script src="/js/site.js"></script>
+    <script src="{{ base_path }}/js/site.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             new EncryptedVideoPage('{{ gallery.id }}', {
